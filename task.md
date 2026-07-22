@@ -1,0 +1,20 @@
+- [x] Phase 1: Architecture Specification (Markdown + Mermaid)
+  - [x] Define System Actors & Roles
+  - [x] Map out Contracts & Responsibilities
+  - [x] Document State Models & Storage Layouts
+  - [x] Draft Sequence, Flow, and State Diagrams
+- [x] Phase 2: Project Scaffolding
+  - [x] Initialize Foundry environment
+  - [x] Set up directory structure (`src`, `test`, `script`)
+  - [x] Install dependencies (OpenZeppelin, Flare Interfaces)
+- [x] Phase 3: Interface Definitions
+  - [x] Draft `IParentVault.sol`
+  - [x] Draft `IStrategyAdapter.sol`
+  - [x] Draft `IFAssetAdapter.sol`
+- [x] Phase 4: Comprehensive Documentation
+  - [x] Create `docs/` folder structure
+  - [x] Write `platform_overview.md` with system Mermaid diagrams
+  - [x] Write `repo_structure.md` blueprint
+  - [x] Write `frontend_architecture.md` with React flows
+- [ ] Phase 5: Core Implementation (Solidity & React)
+  - [ ] TBD based on user approval
