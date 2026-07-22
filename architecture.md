@@ -294,3 +294,27 @@ Since DeFi strategy APIs frequently change, the protocol must be upgradeable wit
 2. **Circuit Breaker**: The vault implements OpenZeppelin's `Pausable` extension.
    - If an underlying DeFi protocol gets hacked, the `owner` can call `pause()`.
    - This instantly blocks all `deposit()`, `withdraw()`, and `executeRebalance()` functions, freezing the funds in their current state until the issue is resolved or a new upgrade is pushed.
+
+---
+
+## 14. Oracle Pricing Math & Share Valuation (FTSO)
+
+When a user deposits an asset (e.g., FXRP), the vault must accurately determine how many `YieldCoin` shares to mint. If the vault holds multiple different assets across various strategies, it cannot do a simple 1:1 token ratio. It must calculate the USD value of the entire vault using the Flare Time Series Oracle (FTSO).
+
+**Implementation Mechanics:**
+- The `ParentVault` integrates with Flare's `IFtsoRegistry` to fetch live prices.
+- **Total Vault Value (USD)** = Sum of `(Strategy Asset Balance * FTSO Price of Asset)` for all active strategies.
+- **Share Minting Formula**: `Shares to Mint = (Deposit Amount * FTSO Price of Deposit Asset) * Total Supply of YieldCoin / Total Vault Value (USD)`
+- **Security**: This precise Oracle math mathematically guarantees that existing `YieldCoin` holders are never diluted by a new depositor, even if the underlying asset prices fluctuate heavily.
+
+---
+
+## 15. Granular Access Control (RBAC)
+
+Relying solely on the `owner` modifier is an anti-pattern for production DeFi protocols. We must implement Role-Based Access Control (RBAC) to securely distribute operational duties.
+
+**Implementation Mechanics:**
+- The `ParentVault` will inherit OpenZeppelin's `AccessControl`.
+- **`DEFAULT_ADMIN_ROLE`**: Held by a Timelock contract or a multisig (e.g., a Gnosis Safe on Flare). This role is solely responsible for pausing the contract, upgrading the proxy, and assigning other roles.
+- **`KEEPER_ROLE`**: Held by specific whitelisted MEV searchers or automation bots. Only addresses with this role are permitted to call the `executeRebalance` and `harvest` functions. 
+- **Security Benefit**: Even though the `executeRebalance` payload is cryptographically secured by the FCC TEE signature, restricting the caller to a `KEEPER_ROLE` prevents anonymous mempool griefers from spamming the function or intentionally timing the execution poorly.
