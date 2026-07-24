@@ -1,30 +1,29 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.20;
+pragma solidity ^0.8.24;
 
 /**
  * @title IFAssetAdapter
- * @notice Interface for routing non-smart contract deposits into Flare via FAssets Direct Minting.
+ * @notice Interface for routing tag-based FAsset direct mints into the ParentVault.
  */
 interface IFAssetAdapter {
     /**
-     * @notice Initiates a direct minting flow using a specific tag.
-     * @param underlyingChainId The ID of the original chain (e.g., XRP, BTC).
-     * @param amount The amount to mint.
-     * @param proof The state connector proof of the underlying deposit.
+     * @notice Reserves a MintingTagManager tag and maps it to the caller.
+     * @return tag The XRPL-compatible destination tag assigned by Flare.
      */
-    function processDirectMint(
-        uint256 underlyingChainId, 
-        uint256 amount, 
-        bytes calldata proof
-    ) external;
+    function registerMintingTag() external payable returns (uint256 tag);
 
     /**
-     * @notice Converts YieldCoin back into underlying assets via the FAsset system.
-     * @param fAssetAmount The amount of FAssets to redeem.
-     * @param destinationAddress The address on the underlying chain to send funds to.
+     * @notice Records an FAsset amount that was directly minted to this adapter using a registered tag.
+     * @dev The caller must be the tag's currently active Flare direct-mint executor.
+     * @param tag MintingTagManager tag used for the underlying-chain payment.
+     * @param depositId Unique direct-mint identifier supplied by the executor.
+     * @param observedMintedAmount Post-fee amount observed from the direct-mint execution.
      */
-    function requestRedemption(
-        uint256 fAssetAmount, 
-        string calldata destinationAddress
-    ) external;
+    function processDirectMint(uint256 tag, bytes32 depositId, uint256 observedMintedAmount) external;
+
+    /**
+     * @notice Transfers a recorded post-fee FAsset amount to the ParentVault and mints ERC-4626 shares.
+     * @param depositId Identifier created by {processDirectMint}.
+     */
+    function settleDirectMint(bytes32 depositId) external returns (uint256 shares);
 }
