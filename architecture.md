@@ -1,19 +1,19 @@
-# Flare-Native Idle Capital Manager (YieldCoin Adaptation)
+# Flare-Native Idle Capital Manager (FlareYield Adaptation)
 
 ## 1. Markdown Specification
 
 ### Overview
-This architecture adapts the original YieldCoin design to a purely Flare-native stack, replacing Chainlink CCIP and Functions with Flare's FAssets, FDC, and Flare Confidential Compute (FCC). This updated version addresses asynchronous minting arbitrage, TEE liveness failures, FAsset executor fee slippage, FTSO liquidity crunches, and MEV-sandwiching during rebalancing.
+This architecture adapts the original FlareYield design to a purely Flare-native stack, replacing Chainlink CCIP and Functions with Flare's FAssets, FDC, and Flare Confidential Compute (FCC). This updated version addresses asynchronous minting arbitrage, TEE liveness failures, FAsset executor fee slippage, FTSO liquidity crunches, and MEV-sandwiching during rebalancing.
 
 ### Actors / Roles
-- **Depositor**: End-user providing underlying assets (e.g., XRP, BTC) to the system in exchange for YieldCoin (the share token).
+- **Depositor**: End-user providing underlying assets (e.g., XRP, BTC) to the system in exchange for FlareYield (the share token).
 - **FCC Off-chain Worker (The Strategist)**: A TEE-based secure enclave responsible for reading external APYs, calculating the optimal allocation, and cryptographically signing the rebalance instructions with slippage parameters.
 - **Relayer / Keeper**: An externally owned account (EOA) or automated script that submits the FCC-signed rebalance payload to the blockchain and triggers state transitions.
 - **FAsset System**: The underlying Flare network protocol responsible for minting representations of non-smart contract tokens via Direct Minting.
 - **FTSO**: The Flare Time Series Oracle, which provides price feeds and yield (via delegation) for wrapped FLR.
 
 ### Contracts & Responsibilities
-- **`YieldToken` (Share Token)**: An ERC20 token representing a user's fractional ownership of the vault's total value. Minted upon realized deposit, burned upon withdrawal.
+- **`FlareYield` (Share Token)**: An ERC20 token representing a user's fractional ownership of the vault's total value. Minted upon realized deposit, burned upon withdrawal.
 - **`ParentVault` (Core Logic & State)**: The central contract deployed on Flare. It holds the canonical state of total shares, total underlying value, active strategy, pending deposit queue (to prevent asynchronous minting arbitrage), liquidity buffer (for immediate withdrawals), and a TEE fallback mechanism.
 - **`FAssetAdapter`**: Handles FAssets Direct Minting mechanics. Uses Tag-based minting to automatically route user deposits into the `ParentVault`. Accounts for executor fee slippage to prevent share dilution.
 - **`StrategyAdapter(s)`**: Modular contracts (e.g., `AaveAdapter`, `KineticAdapter`) wrapping specific deposit/withdraw logic for different DeFi protocols on Flare.
@@ -21,12 +21,12 @@ This architecture adapts the original YieldCoin design to a purely Flare-native 
 ### State Model
 - **`ParentVault` State**: Tracks total active shares, total recognized value across all strategies, current active strategy address, nonce for FCC payloads, pending withdrawals, and TEE fallback timestamps.
 - **`StrategyAdapter` State**: Tracks capital allocated to its protocol and accumulated yield.
-- **`YieldToken` State**: Tracks standard ERC20 balances, allowances, and total supply.
+- **`FlareYield` State**: Tracks standard ERC20 balances, allowances, and total supply.
 - **`FAssetAdapter` State**: Tracks registered minting tags and maps them to user addresses for attribution.
 
 ### Interactions
-- **Deposit (Asynchronous)**: User sends assets to FAsset Core Vault with Tag → FAssets minted to `FAssetAdapter` → `FAssetAdapter` calculates post-fee amount → `ParentVault` locks price at execution block and mints `YieldToken` to user.
-- **Withdraw**: User burns `YieldToken` at `ParentVault` → `ParentVault` fulfills from Liquidity Buffer (if sufficient) or queues withdrawal → If queued, waits for FTSO epoch end or strategy withdrawal → Assets returned via FAsset Redemption.
+- **Deposit (Asynchronous)**: User sends assets to FAsset Core Vault with Tag → FAssets minted to `FAssetAdapter` → `FAssetAdapter` calculates post-fee amount → `ParentVault` locks price at execution block and mints `FlareYield` to user.
+- **Withdraw**: User burns `FlareYield` at `ParentVault` → `ParentVault` fulfills from Liquidity Buffer (if sufficient) or queues withdrawal → If queued, waits for FTSO epoch end or strategy withdrawal → Assets returned via FAsset Redemption.
 - **Rebalance**: FCC Worker calculates optimal strategy & slippage limits → Signs payload → Keeper submits to `ParentVault` → `ParentVault` verifies signature & limits → Withdraws from `OldStrategyAdapter` → Deposits into `NewStrategyAdapter`.
 - **Emergency Fallback**: If FCC is offline for X days, DAO/Multisig triggers force-withdrawal to `ParentVault`.
 
@@ -116,7 +116,7 @@ flowchart TD
     DAO([DAO / Multisig Fallback])
     
     subgraph Flare Network
-        YToken[YieldToken / Share]
+        YToken[FlareYield / Share]
         PVault[ParentVault]
         FAssetA[FAssetAdapter]
         StratA[AaveStrategyAdapter]
@@ -162,7 +162,7 @@ flowchart TD
 | Variable Name | Type | Purpose |
 | --- | --- | --- |
 | `owner` | `address` | Contract administrator (can upgrade/pause/trigger fallback) |
-| `yieldToken` | `address` | Address of the YieldCoin ERC20 share token |
+| `yieldToken` | `address` | Address of the FlareYield ERC20 share token |
 | `activeStrategy` | `address` | The currently active `StrategyAdapter` holding the funds |
 | `fccPublicKey` | `address` | The authorized address representing the FCC TEE enclave |
 | `totalUnderlying` | `uint256` | Cached value of all assets across strategies and buffer |
@@ -177,7 +177,7 @@ flowchart TD
 | --- | --- | --- |
 | `vault` | `address` | Address of the `ParentVault` (only address allowed to call) |
 | `userTags` | `mapping(uint256 => address)` | Maps a registered FAsset Direct Minting Tag to a User Address |
-| `pendingDeposits` | `mapping(address => uint256)` | Tracks FAssets received but not yet realized as YieldTokens |
+| `pendingDeposits` | `mapping(address => uint256)` | Tracks FAssets received but not yet realized as FlareYield shares |
 
 ### `StrategyAdapter` Storage
 
@@ -188,10 +188,10 @@ flowchart TD
 | `receiptToken` | `address` | The yield-bearing token (e.g., aUSDC) from the DeFi protocol |
 | `protocolRouter` | `address` | The entry point for the external DeFi protocol |
 
-### `YieldToken` Storage
+### `FlareYield` Storage
 
 | Variable Name | Type | Purpose |
 | --- | --- | --- |
-| `totalSupply` | `uint256` | Total amount of YieldCoin in circulation |
+| `totalSupply` | `uint256` | Total amount of FlareYield in circulation |
 | `balances` | `mapping(address => uint256)` | Individual user share balances |
 | `vault` | `address` | Address of the `ParentVault` (only entity allowed to mint/burn) |

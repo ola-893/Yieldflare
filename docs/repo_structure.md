@@ -17,7 +17,7 @@ flare_yield_manager/
 ├── contracts/                 # ⛓️ Foundry Workspace (Solidity)
 │   ├── src/
 │   │   ├── interfaces/        # IParentVault, IStrategyAdapter, IFAssetAdapter
-│   │   ├── core/              # ParentVault.sol, YieldToken.sol
+│   │   ├── core/              # ParentVault.sol, FlareYield.sol
 │   │   ├── adapters/          # AaveAdapter.sol, KineticAdapter.sol, FAssetAdapter.sol
 │   │   └── libraries/         # Math, Security, MEV helpers
 │   ├── test/                  # Foundry Unit & Integration Tests

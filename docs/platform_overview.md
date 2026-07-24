@@ -32,7 +32,7 @@ sequenceDiagram
     FAssetSystem->>FlareVault: Transfer FXRP (Reads Tag)
     
     FlareVault->>FlareVault: Lookup User from Tag mapping
-    FlareVault->>User: Mint YieldToken to User's Flare Address
+    FlareVault->>User: Mint FlareYield to User's Flare Address
     UI-->>User: Display Success & Updated Balance
 ```
 
@@ -85,7 +85,7 @@ sequenceDiagram
     
     Searcher->>DEX: Execute backrun trade (Captures Arbitrage)
     Searcher->>Vault: Pay bribe directly to Vault
-    Vault->>Vault: Increase YieldCoin APY with captured bribe
+    Vault->>Vault: Increase FlareYield APY with captured bribe
 ```
 
 ## 4. FAsset Redemption (The Withdrawal Flow)
@@ -102,10 +102,10 @@ sequenceDiagram
     participant FAssetSystem as FAsset Core (Flare)
     participant Underlying as Underlying Chain (XRPL)
 
-    User->>UI: Request Withdrawal (burn YieldCoin)
+    User->>UI: Request Withdrawal (burn FlareYield)
     UI->>FlareVault: withdraw(shares, destinationAddress)
     
-    FlareVault->>FlareVault: Burn YieldCoin shares
+    FlareVault->>FlareVault: Burn FlareYield shares
     FlareVault->>FlareVault: Unwind active strategy (recover FXRP)
     
     FlareVault->>FAssetAdapter: requestRedemption(FXRP, destinationAddress)

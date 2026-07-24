@@ -16,5 +16,24 @@
   - [x] Write `platform_overview.md` with system Mermaid diagrams
   - [x] Write `repo_structure.md` blueprint
   - [x] Write `frontend_architecture.md` with React flows
-- [ ] Phase 5: Core Implementation (Solidity & React)
-  - [ ] TBD based on user approval
+- [x] Phase 5: Core Implementation (Solidity & React)
+  - [x] Implement `ParentVault.sol` (ERC4626, UUPS, FCC validation)
+  - [x] Write Foundry tests for `ParentVault`
+  - [x] Implement `FAssetAdapter.sol` (Direct Minting logic & Tag mapping)
+  - [x] Write Foundry tests for `FAssetAdapter`
+  - [x] Implement `KineticStrategyAdapter.sol` (Compound-v2 kToken lending)
+  - [x] Write Foundry tests for `KineticStrategyAdapter`
+  - [x] Implement `EnosysStrategyAdapter.sol` (DEX V3 swap-based strategy)
+  - [x] Write Foundry tests for `EnosysStrategyAdapter`
+  - [x] Setup Frontend (React) Architecture
+    - [x] Scaffold Vite + React + TypeScript in `/frontend`
+    - [x] Design system CSS (glassmorphism, dark mode, micro-animations)
+    - [x] Wagmi config with Flare Mainnet chain definition
+    - [x] XRP Wallet Context (deposit state machine simulation)
+    - [x] Dashboard page (stats, strategy chart, activity feed)
+    - [x] DepositModal component (7-step XRP→FlareYield flow)
+    - [x] StrategyChart component (Kinetic + Enosys allocation)
+    - [x] ActivityFeed component (rebalances, mints, harvests)
+    - [x] Documentation page (react-markdown + Mermaid rendering)
+    - [x] Docs symlink for in-app documentation serving
+    - [x] TypeScript: zero errors, production build passes

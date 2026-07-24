@@ -10,7 +10,7 @@ Because the platform bridges non-smart contract assets (like XRP and BTC) direct
 - **EVM (Flare Network)**: 
   - Managed via `wagmi` and `viem`.
   - Supports **MetaMask** and **Coinbase Wallet**.
-  - Used for viewing YieldCoin balances, tracking FTSO compounding, and interacting with the `ParentVault` directly if the user is already on Flare.
+  - Used for viewing FlareYield balances, tracking FTSO compounding, and interacting with the `ParentVault` directly if the user is already on Flare.
 - **Non-EVM (e.g., XRP Ledger)**: 
   - Managed via dedicated chain SDKs (e.g., Xumm SDK for XRP).
   - Used strictly to initiate the "1-Click Direct Minting Deposit" by prompting the user to send native tokens to the FAsset Core Vault with their registered destination tag.
@@ -52,7 +52,7 @@ stateDiagram-v2
     BroadcastingXRP --> FDC_Proving : TX Confirmed on XRPL
     
     FDC_Proving --> MintingFAssets : FDC finalizes state proof
-    MintingFAssets --> Complete : Vault issues YieldCoin
+    MintingFAssets --> Complete : Vault issues FlareYield
     
     Complete --> Connected
 ```
