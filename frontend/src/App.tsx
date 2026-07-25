@@ -1,136 +1,132 @@
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom';
-import { WagmiProvider } from 'wagmi';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useAccount, useConnect, useDisconnect } from 'wagmi';
+import React, {lazy, Suspense} from 'react';
+import {Routes, Route, useNavigate, useLocation} from 'react-router-dom';
+import {useAccount} from 'wagmi';
+import {Header} from './components/Header';
+import {HeroCanvas} from './components/HeroCanvas';
+import {ProblemSection} from './components/ProblemSection';
+import {HowItWorksSection} from './components/HowItWorksSection';
+import {VaultSimulator} from './components/VaultSimulator';
+import {SecurityTrustSection} from './components/SecurityTrustSection';
+import {VaultSelectorGrid} from './components/VaultSelectorGrid';
+import {Footer} from './components/Footer';
+import {useConnectModal} from '@rainbow-me/rainbowkit';
 
-import { wagmiConfig } from './config/wagmi';
-import { XrpWalletProvider } from './contexts/XrpWalletContext';
-import Dashboard from './pages/Dashboard';
-import Documentation from './pages/Documentation';
+// Lazy-loaded route components for code splitting
+const Dashboard = lazy(() => import('./pages/Dashboard').then(m => ({default: m.Dashboard})));
+const DepositPage = lazy(() => import('./pages/Deposit').then(m => ({default: m.DepositPage})));
+const Docs = lazy(() => import('./pages/Docs').then(m => ({default: m.Docs})));
+const WithdrawPage = lazy(() => import('./pages/Withdraw').then(m => ({default: m.WithdrawPage})));
 
-import './index.css';
+// Loading spinner for lazy routes
+const RouteLoader = () => (
+  <div className="min-h-screen bg-[#F5F5F3] flex items-center justify-center">
+    <div className="flex flex-col items-center gap-4">
+      <div className="w-8 h-8 border-2 border-[#E1BAC2] border-t-transparent rounded-full animate-spin" />
+      <p className="text-xs font-mono text-[#4A4A4A] uppercase tracking-widest">Loading...</p>
+    </div>
+  </div>
+);
 
-const queryClient = new QueryClient();
+function LandingPage() {
+  const navigate = useNavigate();
+  const {openConnectModal} = useConnectModal();
 
-function WalletButton() {
-  const { address, isConnected } = useAccount();
-  const { connect, connectors } = useConnect();
-  const { disconnect } = useDisconnect();
-
-  if (isConnected) {
-    return (
-      <button id="wallet-btn" className="wallet-btn connected" onClick={() => disconnect()}>
-        <span className="wallet-dot connected" />
-        {address?.slice(0, 6)}...{address?.slice(-4)}
-      </button>
-    );
-  }
+  const handleScrollToVaults = () => {
+    const vaultsSection = document.getElementById('vaults');
+    if (vaultsSection) {
+      vaultsSection.scrollIntoView({behavior: 'smooth'});
+    } else if (openConnectModal) {
+      openConnectModal();
+    }
+  };
 
   return (
-    <button
-      id="connect-wallet-btn"
-      className="wallet-btn"
-      onClick={() => {
-        const injected = connectors.find((c) => c.id === 'injected');
-        if (injected) connect({ connector: injected });
-      }}
-    >
-      <span className="wallet-dot disconnected" />
-      Connect Wallet
-    </button>
+    <>
+      <Header />
+
+      <main className="bg-[#F5F5F3]">
+        <section id="hero-disassembly" className="relative bg-[#F5F5F3]">
+          <HeroCanvas
+            onExploreClick={handleScrollToVaults}
+            onConnectWallet={openConnectModal}
+          />
+        </section>
+
+        <ProblemSection />
+        <HowItWorksSection onConnectWallet={openConnectModal} />
+        <VaultSimulator onConnectWallet={openConnectModal} />
+        <SecurityTrustSection />
+        <VaultSelectorGrid onConnectWallet={openConnectModal} />
+      </main>
+
+      <Footer />
+    </>
   );
 }
 
-function AppLayout() {
+function AppPage() {
+  const navigate = useNavigate();
+
   return (
-    <div className="app-layout">
-      {/* Sidebar */}
-      <aside className="sidebar">
-        <div className="sidebar-logo">
-          <div className="sidebar-logo-icon">F</div>
-          <span className="sidebar-logo-text">FlareYield</span>
-        </div>
-
-        <nav className="sidebar-nav">
-          <div className="sidebar-section-title">Main</div>
-          <NavLink to="/" end className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-            <span className="sidebar-link-icon">◈</span>
-            <span className="sidebar-link-label">Dashboard</span>
-          </NavLink>
-
-          <div className="sidebar-section-title">Resources</div>
-          <NavLink to="/docs" className={({ isActive }) => `sidebar-link ${isActive ? 'active' : ''}`}>
-            <span className="sidebar-link-icon">📄</span>
-            <span className="sidebar-link-label">Documentation</span>
-          </NavLink>
-
-          <a
-            className="sidebar-link"
-            href="https://flarescan.com"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <span className="sidebar-link-icon">🔗</span>
-            <span className="sidebar-link-label">FlareScan</span>
-          </a>
-        </nav>
-
-        <div className="sidebar-footer">
-          <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)' }}>
-            <span className="badge live">
-              <span className="pulse-dot" />
-              Flare Mainnet
-            </span>
-          </div>
-          <p style={{
-            fontSize: '0.72rem',
-            color: 'var(--color-text-muted)',
-            marginTop: 'var(--space-sm)',
-          }}>
-            Chain ID: 14 · ERC-4626 Vault
-          </p>
-        </div>
-      </aside>
-
-      {/* Main content */}
-      <div className="main-content">
-        <header className="header">
-          <h1 className="header-title">
-            <Routes>
-              <Route path="/" element={<>Dashboard</>} />
-              <Route path="/docs" element={<>Documentation</>} />
-            </Routes>
-          </h1>
-          <div className="header-actions">
-            <span className="badge tee">
-              <span className="pulse-dot" style={{ background: '#818cf8' }} />
-              FCC TEE
-            </span>
-            <WalletButton />
-          </div>
-        </header>
-
-        <main className="page-content">
-          <Routes>
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/docs" element={<Documentation />} />
-          </Routes>
-        </main>
-      </div>
-    </div>
+    <Suspense fallback={<RouteLoader />}>
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <Dashboard
+              onNavigateToDeposit={() => navigate('/deposit')}
+              onNavigateToWithdraw={() => navigate('/withdraw')}
+            />
+          }
+        />
+        <Route
+          path="/deposit"
+          element={<DepositPage onBack={() => navigate('/')} />}
+        />
+        <Route
+          path="/withdraw"
+          element={<WithdrawPage onBack={() => navigate('/')} />}
+        />
+      </Routes>
+    </Suspense>
   );
 }
 
 export default function App() {
+  const {isConnected} = useAccount();
+  const location = useLocation();
+
+  // If wallet is connected and not on the landing page root, show app pages
+  // If wallet is connected on root, show dashboard
+  // If wallet is not connected, always show landing page
+  const isDocsRoute = location.pathname === '/docs';
+
+  if (isDocsRoute) {
+    return (
+      <Suspense fallback={<RouteLoader />}>
+        <Docs />
+      </Suspense>
+    );
+  }
+
+  const isAppRoute = isConnected && (
+    location.pathname === '/' ||
+    location.pathname === '/deposit' ||
+    location.pathname === '/withdraw'
+  );
+
+  if (isAppRoute) {
+    return (
+      <div className="min-h-screen bg-[#F5F5F3] text-[#171414] selection:bg-[#E1BAC2] selection:text-white font-sans antialiased">
+        <Header />
+        <AppPage />
+      </div>
+    );
+  }
+
   return (
-    <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        <XrpWalletProvider>
-          <BrowserRouter>
-            <AppLayout />
-          </BrowserRouter>
-        </XrpWalletProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
+    <div className="min-h-screen bg-[#F5F5F3] text-[#171414] selection:bg-[#E1BAC2] selection:text-white font-sans antialiased">
+      <LandingPage />
+    </div>
   );
 }

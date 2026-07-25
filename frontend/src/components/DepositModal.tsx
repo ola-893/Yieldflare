@@ -1,194 +1,202 @@
-import { useState } from 'react';
-import { useXrpWallet, type XrpDepositState } from '../contexts/XrpWalletContext';
+import React, { useState } from 'react';
+import { VaultInfo } from '../types';
+import confetti from 'canvas-confetti';
+import { Check, Sparkles, Lock, RefreshCw, X } from 'lucide-react';
+import xrpImg from '../assets/images/xrp.webp';
+import btcImg from '../assets/images/btc.webp';
 
-const STEP_LABELS: { key: XrpDepositState; label: string }[] = [
-  { key: 'entering_amount', label: 'Amount' },
-  { key: 'requesting_tag', label: 'Tag' },
-  { key: 'waiting_for_signature', label: 'Sign' },
-  { key: 'broadcasting_xrp', label: 'Broadcast' },
-  { key: 'fdc_proving', label: 'FDC Proof' },
-  { key: 'minting_fassets', label: 'Mint' },
-  { key: 'complete', label: 'Done' },
-];
-
-const STEP_ORDER: XrpDepositState[] = STEP_LABELS.map((s) => s.key);
-
-function getStepStatus(current: XrpDepositState, step: XrpDepositState): 'completed' | 'active' | 'pending' {
-  const ci = STEP_ORDER.indexOf(current);
-  const si = STEP_ORDER.indexOf(step);
-  if (si < ci) return 'completed';
-  if (si === ci) return 'active';
-  return 'pending';
-}
-
-interface Props {
+interface DepositModalProps {
+  isOpen: boolean;
   onClose: () => void;
+  selectedVault?: VaultInfo;
 }
 
-export default function DepositModal({ onClose }: Props) {
-  const { state, destinationTag, depositAmount, setDepositAmount, advanceStep, resetFlow } = useXrpWallet();
-  const [inputValue, setInputValue] = useState(depositAmount || '');
+export const DepositModal: React.FC<DepositModalProps> = ({
+  isOpen,
+  onClose,
+  selectedVault
+}) => {
+  const [asset, setAsset] = useState<'XRP' | 'BTC'>(selectedVault?.assetSymbol === 'FXRP' ? 'BTC' : 'XRP');
+  const [amount, setAmount] = useState<string>(asset === 'XRP' ? '2500' : '0.25');
+  const [step, setStep] = useState<'INPUT' | 'MINTING' | 'CONFIRMED'>('INPUT');
 
-  const handleSubmitAmount = () => {
-    if (!inputValue || parseFloat(inputValue) <= 0) return;
-    setDepositAmount(inputValue);
-    advanceStep(); // entering_amount → requesting_tag
+  if (!isOpen) return null;
+
+  const handleDeposit = () => {
+    setStep('MINTING');
+
+    setTimeout(() => {
+      setStep('CONFIRMED');
+      confetti({
+        particleCount: 100,
+        spread: 80,
+        origin: { y: 0.5 },
+        colors: ['#E1BAC2', '#FFB3D9', '#1E1E1E', '#FFFFFF']
+      });
+    }, 1800);
   };
 
-  const handleSignTransaction = () => {
-    advanceStep(); // requesting_tag → waiting_for_signature → ... auto-advances
-  };
-
-  const handleDone = () => {
-    resetFlow();
+  const handleReset = () => {
+    setStep('INPUT');
     onClose();
   };
 
-  const isAutoStep = ['waiting_for_signature', 'broadcasting_xrp', 'fdc_proving', 'minting_fassets'].includes(state);
-
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-container" onClick={(e) => e.stopPropagation()}>
-        <button className="modal-close" onClick={onClose}>✕</button>
+    <div className="fixed inset-0 z-50 bg-[#1E1E1E]/60 backdrop-blur-md flex items-center justify-center p-4">
+      <div className="bg-[#F5F5F3] border border-[#1E1E1E] w-full max-w-md rounded-3xl p-6 sm:p-8 shadow-2xl relative">
+        
+        {/* Close Button */}
+        <button
+          onClick={onClose}
+          className="absolute top-4 right-4 w-8 h-8 rounded-full bg-[#1E1E1E] flex items-center justify-center text-[#F5F5F3] hover:bg-[#E1BAC2] transition-colors"
+        >
+          <X className="w-4 h-4" />
+        </button>
 
-        <h2 className="modal-title">Deposit XRP</h2>
-        <p className="modal-subtitle">
-          Bridge native XRP into FlareYield via Flare's FAsset Direct Minting
-        </p>
-
-        {/* Step indicator */}
-        <div className="deposit-steps">
-          {STEP_LABELS.map(({ key, label }) => {
-            const status = getStepStatus(state, key);
-            return (
-              <div key={key} className={`deposit-step ${status}`}>
-                <div className="deposit-step-dot">
-                  {status === 'completed' ? '✓' : STEP_ORDER.indexOf(key) + 1}
-                </div>
-                <div className="deposit-step-label">{label}</div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Step content */}
-        {state === 'entering_amount' && (
+        {step === 'INPUT' && (
           <div>
-            <div className="input-group">
-              <label className="input-label">Deposit Amount</label>
-              <input
-                id="deposit-amount-input"
-                className="input-field"
-                type="number"
-                placeholder="0.00"
-                value={inputValue}
-                onChange={(e) => setInputValue(e.target.value)}
-                min="0"
-                step="0.01"
-                autoFocus
-              />
-              <div className="input-suffix">XRP · ~${(parseFloat(inputValue || '0') * 2.15).toFixed(2)} USD</div>
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[#1E1E1E]/20 text-[#1E1E1E] text-[10px] font-mono font-bold uppercase tracking-wider mb-3 bg-white/40">
+              <Lock className="w-3 h-3 text-[#E1BAC2]" />
+              <span>Non-Custodial Deposit</span>
             </div>
-            <button
-              id="submit-deposit-btn"
-              className="btn btn-primary btn-lg"
-              style={{ width: '100%' }}
-              onClick={handleSubmitAmount}
-              disabled={!inputValue || parseFloat(inputValue) <= 0}
-            >
-              Continue
-            </button>
-          </div>
-        )}
 
-        {state === 'requesting_tag' && (
-          <div style={{ textAlign: 'center', padding: 'var(--space-xl) 0' }}>
-            <div className="spinner spinner-lg" style={{ margin: '0 auto var(--space-lg)' }} />
-            <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem' }}>
-              Registering your minting tag on Flare...
+            <h3 className="text-2xl font-extrabold text-[#1E1E1E] mb-1" style={{ fontFamily: 'Manrope, sans-serif' }}>
+              Deposit into <span className="text-[#E1BAC2]">{asset === 'XRP' ? 'Kinetic' : 'Enosys'}</span>
+            </h3>
+            <p className="text-xs text-[#4A4A4A] mb-6">
+              Deposit {asset === 'XRP' ? 'FXRP' : 'USDC.e'} into the ParentVault via a queue-settle flow. Yields accrue through strategy-level exchange rates.
             </p>
-            {destinationTag && (
-              <div style={{ marginTop: 'var(--space-lg)' }}>
-                <div className="input-label">Your Destination Tag</div>
-                <div style={{
-                  fontFamily: 'var(--font-mono)',
-                  fontSize: '1.8rem',
-                  fontWeight: 700,
-                  background: 'var(--gradient-accent)',
-                  WebkitBackgroundClip: 'text',
-                  WebkitTextFillColor: 'transparent',
-                  backgroundClip: 'text',
-                }}>
-                  {destinationTag}
-                </div>
+
+            {/* Asset Toggle */}
+            <div className="grid grid-cols-2 gap-2 p-1.5 rounded-2xl border border-[#1E1E1E]/15 bg-white/40 mb-6">
+              <button
+                onClick={() => {
+                  setAsset('XRP');
+                  setAmount('2500');
+                }}
+                className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                  asset === 'XRP'
+                    ? 'bg-[#1E1E1E] text-[#E1BAC2]'
+                    : 'text-[#4A4A4A]'
+                }`}
+              >
+                <img src={btcImg} alt="" className="w-4 h-4 object-contain" />
+                Kinetic (USDC.e)
+              </button>
+              <button
+                onClick={() => {
+                  setAsset('BTC');
+                  setAmount('0.25');
+                }}
+                className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                  asset === 'BTC'
+                    ? 'bg-[#1E1E1E] text-[#E1BAC2]'
+                    : 'text-[#4A4A4A]'
+                }`}
+              >
+                <img src={xrpImg} alt="" className="w-4 h-4 object-contain" />
+                Enosys (FXRP)
+              </button>
+            </div>
+
+            {/* Amount Input */}
+            <div className="mb-6">
+              <div className="flex items-center justify-between text-xs font-mono font-bold text-[#1E1E1E] mb-2">
+                <span>Deposit Amount</span>
+                <span className="text-[#4A4A4A]">Connect wallet to see balance</span>
+              </div>
+              <div className="relative">
+                <input
+                  type="number"
+                  value={amount}
+                  onChange={(e) => setAmount(e.target.value)}
+                  className="w-full bg-white border border-[#1E1E1E]/20 rounded-2xl px-4 py-3 text-lg font-bold text-[#1E1E1E] focus:outline-none focus:border-[#1E1E1E]"
+                  placeholder="0.00"
+                  style={{ fontFamily: 'Manrope, sans-serif' }}
+                />
                 <button
-                  id="sign-xrp-tx-btn"
-                  className="btn btn-primary btn-lg"
-                  style={{ width: '100%', marginTop: 'var(--space-lg)' }}
-                  onClick={handleSignTransaction}
+                  disabled
+                  className="absolute right-3 top-3 px-2.5 py-1 rounded-full bg-[#4A4A4A]/30 text-[#4A4A4A] text-[10px] font-mono font-bold cursor-not-allowed"
                 >
-                  Sign XRP Transaction
+                  MAX
                 </button>
               </div>
-            )}
-          </div>
-        )}
+            </div>
 
-        {isAutoStep && (
-          <div style={{ textAlign: 'center', padding: 'var(--space-xl) 0' }}>
-            <div className="spinner spinner-lg" style={{ margin: '0 auto var(--space-lg)' }} />
-            <p style={{ color: 'var(--color-text-primary)', fontWeight: 600, marginBottom: 'var(--space-sm)' }}>
-              {state === 'waiting_for_signature' && 'Waiting for Xumm signature...'}
-              {state === 'broadcasting_xrp' && 'Broadcasting to XRP Ledger...'}
-              {state === 'fdc_proving' && 'FDC generating state proof...'}
-              {state === 'minting_fassets' && 'Minting FXRP & FlareYield shares...'}
-            </p>
-            <p style={{ color: 'var(--color-text-muted)', fontSize: '0.82rem' }}>
-              {state === 'fdc_proving' && 'This may take 1–3 minutes on mainnet'}
-              {state === 'minting_fassets' && 'Almost there — confirming on Flare'}
-            </p>
-          </div>
-        )}
-
-        {state === 'complete' && (
-          <div style={{ textAlign: 'center', padding: 'var(--space-xl) 0' }}>
-            <div style={{
-              width: 64, height: 64, borderRadius: '50%',
-              background: 'rgba(52, 211, 153, 0.15)', color: 'var(--color-yield)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: '2rem', margin: '0 auto var(--space-lg)',
-            }}>✓</div>
-            <p style={{ fontWeight: 700, fontSize: '1.2rem', marginBottom: 'var(--space-sm)' }}>
-              Deposit Complete!
-            </p>
-            <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9rem', marginBottom: 'var(--space-lg)' }}>
-              {depositAmount} XRP → {(parseFloat(depositAmount) * 0.95).toFixed(2)} FXRP minted (5% executor fee)
-            </p>
-            <div style={{
-              background: 'var(--color-bg-tertiary)', borderRadius: 'var(--radius-md)',
-              padding: 'var(--space-md) var(--space-lg)', marginBottom: 'var(--space-lg)',
-              fontFamily: 'var(--font-mono)', fontSize: '0.85rem',
-            }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                <span style={{ color: 'var(--color-text-muted)' }}>FlareYield Shares</span>
-                <span style={{ fontWeight: 600 }}>{(parseFloat(depositAmount) * 0.95).toFixed(2)} FYD</span>
+            {/* Summary Box */}
+            <div className="p-4 rounded-2xl bg-white/70 border border-[#1E1E1E]/15 mb-6 space-y-2 text-xs">
+              <div className="flex items-center justify-between text-[#4A4A4A]">
+                <span>FAsset / Token:</span>
+                <span className="font-bold text-[#1E1E1E]">{amount || 0} {asset === 'XRP' ? 'FXRP' : 'USDC.e'}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span style={{ color: 'var(--color-text-muted)' }}>Est. APY</span>
-                <span style={{ fontWeight: 600, color: 'var(--color-yield)' }}>8.4%</span>
+              <div className="flex items-center justify-between text-[#4A4A4A]">
+                <span>Target Vault:</span>
+                <span className="font-bold text-[#E1BAC2]">{asset === 'XRP' ? 'Kinetic Strategy' : 'Enosys Strategy'}</span>
+              </div>
+              <div className="flex items-center justify-between text-[#4A4A4A]">
+                <span>Vault Share Token:</span>
+                <span className="font-bold text-[#1E1E1E]">ERC-4626 Shares</span>
               </div>
             </div>
+
             <button
-              id="close-deposit-btn"
-              className="btn btn-primary btn-lg"
-              style={{ width: '100%' }}
-              onClick={handleDone}
+              onClick={handleDeposit}
+              className="w-full py-3.5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-[#000000] transition-all shadow-md flex items-center justify-center gap-2"
             >
-              Done
+              <Sparkles className="w-4 h-4 text-[#E1BAC2]" />
+              <span>Confirm Non-Custodial Deposit</span>
             </button>
           </div>
         )}
+
+        {step === 'MINTING' && (
+          <div className="py-8 text-center">
+            <div className="w-16 h-16 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center mx-auto mb-4 animate-spin">
+              <RefreshCw className="w-8 h-8 text-[#E1BAC2]" />
+            </div>
+            <h4 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{ fontFamily: 'Manrope, sans-serif' }}>Processing Deposit Queue</h4>
+            <p className="text-xs text-[#4A4A4A]">
+              Queueing FAsset deposit and waiting for settlement confirmation on Flare Coston2 testnet...
+            </p>
+          </div>
+        )}
+
+        {step === 'CONFIRMED' && (
+          <div className="py-4 text-center">
+            <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-600 mx-auto mb-4">
+              <Check className="w-8 h-8" />
+            </div>
+
+            <h4 className="text-2xl font-extrabold text-[#1E1E1E] mb-1" style={{ fontFamily: 'Manrope, sans-serif' }}>Deposit Confirmed!</h4>
+            <p className="text-xs text-emerald-700 font-mono font-bold mb-6">
+              Your ERC-4626 vault shares are now accruing yield on Flare Coston2 testnet.
+            </p>
+
+            <div className="p-4 rounded-2xl bg-white/70 border border-[#1E1E1E]/15 mb-6 text-xs text-left space-y-2">
+              <div className="flex justify-between">
+                <span className="text-[#4A4A4A]">Deposited:</span>
+                <span className="font-bold text-[#1E1E1E]">{amount} {asset === 'XRP' ? 'USDC.e' : 'FXRP'}</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#4A4A4A]">Vault Shares:</span>
+                <span className="font-bold text-[#E1BAC2]">{amount} ERC-4626 Shares</span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-[#4A4A4A]">Network:</span>
+                <span className="font-mono text-[10px] text-emerald-700 font-bold">Flare Coston2 Testnet</span>
+              </div>
+            </div>
+
+            <button
+              onClick={handleReset}
+              className="w-full py-3.5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-[#E1BAC2] transition-all"
+            >
+              Done & View Portfolio
+            </button>
+          </div>
+        )}
+
       </div>
     </div>
   );
-}
+};

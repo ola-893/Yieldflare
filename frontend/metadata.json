@@ -1,0 +1,6 @@
+{
+  "name": "Flux",
+  "description": "DeFi yield optimization protocol on Flare Network for native XRP and BTC with scrollytelling vault disassembly and TEE security.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
