@@ -1,0 +1,13 @@
+{
+  "assetManagerFXRP": "0xc1Ca88b937d0b528842F95d5731ffB586f4fbDFA",
+  "chainId": 114,
+  "daoMultisig": "0x506e724d7FDdbF91B6607d5Af0700d385D952f8a",
+  "defaultExecutor": "0x506e724d7FDdbF91B6607d5Af0700d385D952f8a",
+  "fAssetAdapter": "0x38e37aff09a57efEfa62cE19AdEEef3bfc008369",
+  "fccSigner": "0x506e724d7FDdbF91B6607d5Af0700d385D952f8a",
+  "fxrp": "0x0b6A3645c240605887a5532109323A3E12273dc7",
+  "mintingTagManager": "0x094511737909b626391106bBc21B25feb2D67B96",
+  "network": "Coston2",
+  "parentVault": "0xdD227AC6660510985FE035A01e2cE7bbE75C78d4",
+  "parentVaultImplementation": "0x092C790d51CBf208a47edaB20d1e9c4C73737081"
+}
