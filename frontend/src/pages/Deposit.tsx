@@ -5,11 +5,20 @@ import {motion, AnimatePresence} from 'motion/react';
 import {Lock, RefreshCw, Check, ArrowRight, Copy, Clock, AlertCircle} from 'lucide-react';
 import xrpImg from '../assets/images/xrp.webp';
 import btcImg from '../assets/images/btc.webp';
-import {CONTRACTS, FASSET_ADAPTER_ABI, ASSET_MANAGER_ABI} from '../config/contracts';
-
-const RESERVATION_FEE = 0n; // Would read from contract
+import {CONTRACTS, FASSET_ADAPTER_ABI, ASSET_MANAGER_ABI, MINTING_TAG_MANAGER_ABI} from '../config/contracts';
 
 type DepositStep = 'SELECT' | 'RESERVE_TAG' | 'AWAITING_DEPOSIT' | 'READY_TO_SETTLE' | 'SETTLING' | 'COMPLETE';
+
+// Object-format ABI for decodeEventLog (human-readable strings don't work here)
+const EVENT_ABI = [{
+  type: 'event',
+  name: 'MintingTagRegistered',
+  inputs: [
+    {indexed: true, name: 'tag', type: 'uint256'},
+    {indexed: true, name: 'user', type: 'address'},
+    {indexed: true, name: 'executor', type: 'address'},
+  ],
+}] as const;
 
 interface DepositPageProps {
   onBack: () => void;
@@ -60,12 +69,33 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   };
 
   // Register minting tag
-  const {writeContract: registerTag, data: registerHash, isPending: isRegistering} = useWriteContract();
+  const {writeContract: registerTag, data: registerHash, isPending: isRegistering, error: registerError} = useWriteContract();
   const {isLoading: isRegisterConfirming, data: registerReceipt} = useWaitForTransactionReceipt({hash: registerHash});
 
   // Settle direct mint
   const {writeContract: settleMint, data: settleHash, isPending: isSettling} = useWriteContract();
   const {isLoading: isSettleConfirming} = useWaitForTransactionReceipt({hash: settleHash});
+
+  // Read the actual reservation fee from the MintingTagManager contract
+  const {data: reservationFeeRaw, isLoading: isFeeLoading, error: feeError} = useReadContract({
+    address: CONTRACTS.mintingTagManager,
+    abi: MINTING_TAG_MANAGER_ABI as any,
+    functionName: 'reservationFee',
+    query: {
+      retry: 2,
+      staleTime: 30_000,
+    },
+  });
+  // Fall back to 0 if the read fails (e.g. contract doesn't expose the function)
+  const reservationFee: bigint = (reservationFeeRaw as bigint | undefined) ?? 0n;
+
+  // Auto-recover from rejected/failed transactions
+  useEffect(() => {
+    if (step === 'RESERVE_TAG' && registerError) {
+      const timer = setTimeout(() => setStep('SELECT'), 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [step, registerError]);
 
   // Poll for pending deposit (only when contract address is deployed)
   const isDeployed = CONTRACTS.fAssetAdapter !== '0x0000000000000000000000000000000000000000';
@@ -99,7 +129,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
           try {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             const decoded: any = decodeEventLog({
-              abi: FASSET_ADAPTER_ABI as any,
+              abi: EVENT_ABI,
               data: log.data,
               topics: log.topics,
             });
@@ -138,7 +168,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
       address: CONTRACTS.fAssetAdapter,
       abi: FASSET_ADAPTER_ABI as any,
       functionName: 'registerMintingTag',
-      value: RESERVATION_FEE,
+      value: reservationFee,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
     setStep('RESERVE_TAG');
@@ -235,11 +265,17 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
               setAsset={setAsset}
               onReserve={handleReserveTag}
               isRegistering={isRegistering || isRegisterConfirming}
+              isFeeLoading={isFeeLoading && !feeError}
+              feeError={!!feeError}
             />
           )}
 
           {step === 'RESERVE_TAG' && (
-            <StepReserving key="reserving" />
+            <StepReserving
+              key="reserving"
+              error={registerError?.message}
+              onRetry={handleReserveTag}
+            />
           )}
 
           {step === 'AWAITING_DEPOSIT' && (
@@ -324,7 +360,9 @@ const StepSelectAsset: React.FC<{
   setAsset: (a: 'XRP' | 'BTC') => void;
   onReserve: () => void;
   isRegistering: boolean;
-}> = ({asset, setAsset, onReserve, isRegistering}) => (
+  isFeeLoading: boolean;
+  feeError: boolean;
+}> = ({asset, setAsset, onReserve, isRegistering, isFeeLoading, feeError}) => (
   <motion.div
     initial={{opacity: 0, y: 20}}
     animate={{opacity: 1, y: 0}}
@@ -351,9 +389,7 @@ const StepSelectAsset: React.FC<{
         isSelected={asset === 'BTC'}
         onClick={() => setAsset('BTC')}
       />
-    </div>
-
-    <div className="p-4 rounded-2xl bg-[#F5F5F3] border border-[#1E1E1E]/10 mb-6">
+    </div>      <div className="p-4 rounded-2xl bg-[#F5F5F3] border border-[#1E1E1E]/10 mb-6">
       <div className="flex items-start gap-2">
         <AlertCircle className="w-4 h-4 text-[#4A4A4A] mt-0.5 shrink-0" />
         <p className="text-xs text-[#4A4A4A] leading-relaxed">
@@ -361,6 +397,12 @@ const StepSelectAsset: React.FC<{
         </p>
       </div>
     </div>
+
+    {feeError && (
+      <div className="p-3 rounded-xl bg-red-50 border border-red-200 mb-6">
+        <p className="text-xs text-red-700">Could not load reservation fee from contract — proceeding with 0 value.</p>
+      </div>
+    )}
 
     <button
       onClick={onReserve}
@@ -370,7 +412,12 @@ const StepSelectAsset: React.FC<{
       {isRegistering ? (
         <>
           <RefreshCw className="w-4 h-4 animate-spin" />
-          <span>Confirming Transaction...</span>
+          <span>Confirm in Wallet...</span>
+        </>
+      ) : isFeeLoading ? (
+        <>
+          <RefreshCw className="w-4 h-4 animate-spin" />
+          <span>Loading...</span>
         </>
       ) : (
         <>
@@ -383,7 +430,7 @@ const StepSelectAsset: React.FC<{
 );
 
 // Step: Reserving Tag
-const StepReserving: React.FC = () => (
+const StepReserving: React.FC<{error?: string | null; onRetry?: () => void}> = ({error, onRetry}) => (
   <motion.div
     initial={{opacity: 0, y: 20}}
     animate={{opacity: 1, y: 0}}
@@ -396,9 +443,22 @@ const StepReserving: React.FC = () => (
     <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
       Reserving your minting tag
     </h3>
-    <p className="text-xs text-[#4A4A4A]">
+    <p className="text-xs text-[#4A4A4A] mb-4">
       Confirm the transaction in your wallet. This registers a unique destination tag on Flare's MintingTagManager.
     </p>
+    {error && (
+      <div className="p-3 rounded-xl bg-red-50 border border-red-200 mb-4">
+        <p className="text-xs text-red-700">{error}</p>
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="mt-2 text-xs font-bold text-red-600 hover:text-red-800 underline"
+          >
+            Try Again
+          </button>
+        )}
+      </div>
+    )}
   </motion.div>
 );
 
