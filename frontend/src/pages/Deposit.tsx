@@ -1,6 +1,6 @@
 import React, {useState, useEffect} from 'react';
-import {useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract, usePublicClient} from 'wagmi';
-import {parseEventLogs} from 'viem';
+import {useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract} from 'wagmi';
+import {decodeEventLog} from 'viem';
 import {motion, AnimatePresence} from 'motion/react';
 import {Lock, RefreshCw, Check, ArrowRight, Copy, Clock, AlertCircle} from 'lucide-react';
 import xrpImg from '../assets/images/xrp.webp';
@@ -61,14 +61,11 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
 
   // Register minting tag
   const {writeContract: registerTag, data: registerHash, isPending: isRegistering} = useWriteContract();
-  const {isLoading: isRegisterConfirming} = useWaitForTransactionReceipt({hash: registerHash});
+  const {isLoading: isRegisterConfirming, data: registerReceipt} = useWaitForTransactionReceipt({hash: registerHash});
 
   // Settle direct mint
   const {writeContract: settleMint, data: settleHash, isPending: isSettling} = useWriteContract();
   const {isLoading: isSettleConfirming} = useWaitForTransactionReceipt({hash: settleHash});
-
-  // Public client for parsing tx receipts
-  const publicClient = usePublicClient();
 
   // Poll for pending deposit (only when contract address is deployed)
   const isDeployed = CONTRACTS.fAssetAdapter !== '0x0000000000000000000000000000000000000000';
@@ -92,32 +89,39 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
     }
   }, [pendingDeposit]);
 
-  // After registration tx confirms, extract tag from logs and move to awaiting
+  // After registration tx confirms, extract real tag from MintingTagRegistered event logs
   useEffect(() => {
-    if (registerHash && !isRegisterConfirming && step === 'RESERVE_TAG' && publicClient) {
-      const parseTag = async () => {
-        try {
-          const receipt = await publicClient.getTransactionReceipt({hash: registerHash});
-          if (!receipt) return;
-          const logs = parseEventLogs({
-            abi: FASSET_ADAPTER_ABI,
-            logs: receipt.logs,
-            eventName: 'MintingTagRegistered',
-          });
-          if (logs.length > 0) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const tag = (logs[0] as any).args.tag.toString();
-            setReservedTag(tag);
-            setStep('AWAITING_DEPOSIT');
-            saveState('AWAITING_DEPOSIT', tag);
+    if (registerReceipt && !isRegisterConfirming && step === 'RESERVE_TAG') {
+      try {
+        let actualTag = '';
+        for (const log of registerReceipt.logs) {
+          try {
+            const decoded = decodeEventLog({
+              abi: FASSET_ADAPTER_ABI,
+              data: log.data,
+              topics: log.topics,
+            });
+            if (decoded.eventName === 'MintingTagRegistered') {
+              actualTag = (decoded.args as any).tag.toString();
+              break;
+            }
+          } catch (e) {
+            // ignore logs that can't be decoded
           }
-        } catch (err) {
-          console.error('Failed to parse MintingTagRegistered event:', err);
         }
-      };
-      parseTag();
+
+        if (actualTag) {
+          setReservedTag(actualTag);
+          setStep('AWAITING_DEPOSIT');
+          saveState('AWAITING_DEPOSIT', actualTag);
+        } else {
+          console.error('MintingTagRegistered event not found in receipt logs');
+        }
+      } catch (err) {
+        console.error('Error parsing receipt:', err);
+      }
     }
-  }, [registerHash, isRegisterConfirming, step, publicClient]);
+  }, [registerReceipt, isRegisterConfirming, step]);
 
   // After settle tx confirms
   useEffect(() => {
