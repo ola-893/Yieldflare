@@ -111,6 +111,17 @@ export const FXRP_ABI = [
   'event Approval(address indexed owner, address indexed spender, uint256 value)',
 ] as const;
 
+// AssetManager ABI (for fetching Core Vault XRPL address)
+export const ASSET_MANAGER_ABI = [
+  {
+    name: 'directMintingPaymentAddress',
+    type: 'function',
+    stateMutability: 'view',
+    inputs: [],
+    outputs: [{name: '', type: 'string'}],
+  },
+] as const;
+
 // MintingTagManager minimal ABI
 export const MINTING_TAG_MANAGER_ABI = [
   'function reservationFee() external view returns (uint256)',

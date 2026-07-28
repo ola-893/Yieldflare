@@ -1,73 +1,13 @@
 import React, {useState, useEffect} from 'react';
-import {useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract} from 'wagmi';
+import {useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract, usePublicClient} from 'wagmi';
+import {parseEventLogs} from 'viem';
 import {motion, AnimatePresence} from 'motion/react';
-import {Lock, RefreshCw, Check, ArrowRight, Copy, ExternalLink, Clock, AlertCircle} from 'lucide-react';
+import {Lock, RefreshCw, Check, ArrowRight, Copy, Clock, AlertCircle} from 'lucide-react';
 import xrpImg from '../assets/images/xrp.webp';
 import btcImg from '../assets/images/btc.webp';
+import {CONTRACTS, FASSET_ADAPTER_ABI, ASSET_MANAGER_ABI} from '../config/contracts';
 
-// FAssetAdapter ABI (minimal functions needed)
-const FASSET_ADAPTER_ABI = [
-  {
-    name: 'registerMintingTag',
-    type: 'function',
-    stateMutability: 'payable',
-    inputs: [],
-    outputs: [{name: 'tag', type: 'uint256'}],
-  },
-  {
-    name: 'settleDirectMint',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [{name: 'depositId', type: 'bytes32'}],
-    outputs: [{name: 'shares', type: 'uint256'}],
-  },
-  {
-    name: 'tagUser',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{name: 'tag', type: 'uint256'}],
-    outputs: [{name: '', type: 'address'}],
-  },
-  {
-    name: 'pendingDepositForTag',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{name: 'tag', type: 'uint256'}],
-    outputs: [{name: '', type: 'bytes32'}],
-  },
-  {
-    name: 'pendingDirectMints',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{name: 'depositId', type: 'bytes32'}],
-    outputs: [
-      {
-        type: 'tuple',
-        components: [
-          {name: 'receiver', type: 'address'},
-          {name: 'tag', type: 'uint256'},
-          {name: 'assets', type: 'uint256'},
-        ],
-      },
-    ],
-  },
-] as const;
-
-// Deployed Coston2 contract addresses
-const FASSET_ADAPTER_ADDRESS: `0x${string}` = '0x7Da0baBc8F5690A61f8FC63Df40aA5aF7eb33F75';
-const ASSET_MANAGER_ADDRESS: `0x${string}` = '0xc1Ca88b937d0b528842F95d5731ffB586f4fbDFA';
 const RESERVATION_FEE = 0n; // Would read from contract
-
-// AssetManager ABI (for fetching Core Vault XRPL address)
-const ASSET_MANAGER_ABI = [
-  {
-    name: 'directMintingPaymentAddress',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{name: '', type: 'string'}],
-  },
-] as const;
 
 type DepositStep = 'SELECT' | 'RESERVE_TAG' | 'AWAITING_DEPOSIT' | 'READY_TO_SETTLE' | 'SETTLING' | 'COMPLETE';
 
@@ -78,7 +18,7 @@ interface DepositPageProps {
 // Fetches the FAsset Core Vault XRPL address from Flare's AssetManager contract
 const useCoreVaultAddress = () => {
   const {data: coreVaultAddress, isLoading, error} = useReadContract({
-    address: ASSET_MANAGER_ADDRESS,
+    address: CONTRACTS.assetManagerFXRP,
     abi: ASSET_MANAGER_ABI,
     functionName: 'directMintingPaymentAddress',
     query: {refetchInterval: false},
@@ -127,11 +67,14 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const {writeContract: settleMint, data: settleHash, isPending: isSettling} = useWriteContract();
   const {isLoading: isSettleConfirming} = useWaitForTransactionReceipt({hash: settleHash});
 
+  // Public client for parsing tx receipts
+  const publicClient = usePublicClient();
+
   // Poll for pending deposit (only when contract address is deployed)
-  const isDeployed = FASSET_ADAPTER_ADDRESS !== '0x0000000000000000000000000000000000000000';
+  const isDeployed = CONTRACTS.fAssetAdapter !== '0x0000000000000000000000000000000000000000';
   const {data: pendingDeposit} = useReadContract({
-    address: FASSET_ADAPTER_ADDRESS,
-    abi: FASSET_ADAPTER_ABI,
+    address: CONTRACTS.fAssetAdapter,
+    abi: FASSET_ADAPTER_ABI as any,
     functionName: 'pendingDepositForTag',
     args: reservedTag ? [BigInt(reservedTag)] : undefined,
     query: {
@@ -151,15 +94,30 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
 
   // After registration tx confirms, extract tag from logs and move to awaiting
   useEffect(() => {
-    if (registerHash && !isRegisterConfirming && step === 'RESERVE_TAG') {
-      // In production, parse the MintingTagRegistered event from receipt
-      // For now, simulate receiving a tag
-      const mockTag = Math.floor(Math.random() * 1000000).toString();
-      setReservedTag(mockTag);
-      setStep('AWAITING_DEPOSIT');
-      saveState('AWAITING_DEPOSIT', mockTag);
+    if (registerHash && !isRegisterConfirming && step === 'RESERVE_TAG' && publicClient) {
+      const parseTag = async () => {
+        try {
+          const receipt = await publicClient.getTransactionReceipt({hash: registerHash});
+          if (!receipt) return;
+          const logs = parseEventLogs({
+            abi: FASSET_ADAPTER_ABI,
+            logs: receipt.logs,
+            eventName: 'MintingTagRegistered',
+          });
+          if (logs.length > 0) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const tag = (logs[0] as any).args.tag.toString();
+            setReservedTag(tag);
+            setStep('AWAITING_DEPOSIT');
+            saveState('AWAITING_DEPOSIT', tag);
+          }
+        } catch (err) {
+          console.error('Failed to parse MintingTagRegistered event:', err);
+        }
+      };
+      parseTag();
     }
-  }, [registerHash, isRegisterConfirming]);
+  }, [registerHash, isRegisterConfirming, step, publicClient]);
 
   // After settle tx confirms
   useEffect(() => {
@@ -171,8 +129,8 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
 
   const handleReserveTag = () => {
     registerTag({
-      address: FASSET_ADAPTER_ADDRESS,
-      abi: FASSET_ADAPTER_ABI,
+      address: CONTRACTS.fAssetAdapter,
+      abi: FASSET_ADAPTER_ABI as any,
       functionName: 'registerMintingTag',
       value: RESERVATION_FEE,
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -183,8 +141,8 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const handleSettle = () => {
     if (!depositId) return;
     settleMint({
-      address: FASSET_ADAPTER_ADDRESS,
-      abi: FASSET_ADAPTER_ABI,
+      address: CONTRACTS.fAssetAdapter,
+      abi: FASSET_ADAPTER_ABI as any,
       functionName: 'settleDirectMint',
       args: [depositId as `0x${string}`],
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -207,6 +165,10 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
     setDepositId(null);
   };
 
+  // Fetch the FAsset Core Vault XRPL address (must be above early return per React Rules of Hooks)
+  const {coreVaultAddress, isLoading: isVaultLoading} = useCoreVaultAddress();
+  const [vaultCopied, setVaultCopied] = useState(false);
+
   if (!isConnected) {
     return (
       <div className="min-h-screen bg-[#F5F5F3] flex items-center justify-center pt-24">
@@ -223,10 +185,6 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
       </div>
     );
   }
-
-  // Fetch the FAsset Core Vault XRPL address
-  const {coreVaultAddress, isLoading: isVaultLoading} = useCoreVaultAddress();
-  const [vaultCopied, setVaultCopied] = useState(false);
 
   const handleCopyVaultAddress = () => {
     if (coreVaultAddress) {

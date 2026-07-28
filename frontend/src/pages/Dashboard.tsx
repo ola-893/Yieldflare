@@ -4,48 +4,9 @@ import {formatUnits} from 'viem';
 import {motion} from 'motion/react';
 import {TrendingUp, Layers, Clock, ArrowUpRight, ArrowDownRight, Wallet, RefreshCw, Zap, ShieldCheck, Copy, Check} from 'lucide-react';
 import xrpImg from '../assets/images/xrp.webp';
+import {CONTRACTS, PARENT_VAULT_ABI} from '../config/contracts';
 
-// ParentVault ERC-4626 ABI (minimal read functions)
-const PARENT_VAULT_ABI = [
-  {
-    name: 'totalAssets',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{type: 'uint256'}],
-  },
-  {
-    name: 'totalSupply',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{type: 'uint256'}],
-  },
-  {
-    name: 'balanceOf',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{name: 'account', type: 'address'}],
-    outputs: [{type: 'uint256'}],
-  },
-  {
-    name: 'activeStrategy',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{type: 'address'}],
-  },
-  {
-    name: 'asset',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{type: 'address'}],
-  },
-] as const;
-
-// Deployed Coston2 contract address
-const PARENT_VAULT_ADDRESS: `0x${string}` = '0x62E0EC7483E779DA0fCa9B701872e4af8a0FEd87';
+const PARENT_VAULT_ADDRESS: `0x${string}` = CONTRACTS.parentVault;
 
 interface DashboardProps {
   onNavigateToDeposit: () => void;

@@ -3,109 +3,7 @@ import {useAccount, useReadContract, useWriteContract, useWaitForTransactionRece
 import {formatUnits, parseUnits} from 'viem';
 import {motion, AnimatePresence} from 'motion/react';
 import {ArrowUpRight, RefreshCw, Check, AlertCircle, Wallet, Layers, TrendingUp, Clock, ArrowRight} from 'lucide-react';
-
-// ParentVault ERC-4626 ABI (withdraw + redeem + reads)
-const PARENT_VAULT_ABI = [
-  {
-    name: 'totalAssets',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{type: 'uint256'}],
-  },
-  {
-    name: 'totalSupply',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{type: 'uint256'}],
-  },
-  {
-    name: 'balanceOf',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{name: 'account', type: 'address'}],
-    outputs: [{type: 'uint256'}],
-  },
-  {
-    name: 'asset',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{type: 'address'}],
-  },
-  {
-    name: 'decimals',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [],
-    outputs: [{type: 'uint8'}],
-  },
-  {
-    name: 'convertToAssets',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{name: 'shares', type: 'uint256'}],
-    outputs: [{type: 'uint256'}],
-  },
-  {
-    name: 'convertToShares',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{name: 'assets', type: 'uint256'}],
-    outputs: [{type: 'uint256'}],
-  },
-  {
-    name: 'maxWithdraw',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{name: 'owner', type: 'address'}],
-    outputs: [{type: 'uint256'}],
-  },
-  {
-    name: 'maxRedeem',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{name: 'owner', type: 'address'}],
-    outputs: [{type: 'uint256'}],
-  },
-  {
-    name: 'previewWithdraw',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{name: 'assets', type: 'uint256'}],
-    outputs: [{type: 'uint256'}],
-  },
-  {
-    name: 'previewRedeem',
-    type: 'function',
-    stateMutability: 'view',
-    inputs: [{name: 'shares', type: 'uint256'}],
-    outputs: [{type: 'uint256'}],
-  },
-  {
-    name: 'withdraw',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      {name: 'assets', type: 'uint256'},
-      {name: 'receiver', type: 'address'},
-      {name: 'owner', type: 'address'},
-    ],
-    outputs: [{name: 'shares', type: 'uint256'}],
-  },
-  {
-    name: 'redeem',
-    type: 'function',
-    stateMutability: 'nonpayable',
-    inputs: [
-      {name: 'shares', type: 'uint256'},
-      {name: 'receiver', type: 'address'},
-      {name: 'owner', type: 'address'},
-    ],
-    outputs: [{name: 'assets', type: 'uint256'}],
-  },
-] as const;
+import {CONTRACTS, PARENT_VAULT_ABI} from '../config/contracts';
 
 // Write-only ABI (non-const to satisfy wagmi writeContract typing)
 const WITHDRAW_ABI = [
@@ -133,8 +31,7 @@ const WITHDRAW_ABI = [
   },
 ];
 
-// Deployed Coston2 contract address
-const PARENT_VAULT_ADDRESS: `0x${string}` = '0x62E0EC7483E779DA0fCa9B701872e4af8a0FEd87';
+const PARENT_VAULT_ADDRESS: `0x${string}` = CONTRACTS.parentVault;
 
 type WithdrawMode = 'ASSET' | 'SHARE';
 type WithdrawStep = 'INPUT' | 'CONFIRMING' | 'SUCCESS' | 'ERROR';
