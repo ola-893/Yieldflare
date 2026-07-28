@@ -31,84 +31,80 @@ export const CONTRACTS = {
  * Import from generated files or define minimal ABIs here
  */
 
-// ParentVault (ERC-4626) minimal ABI
+// ParentVault (ERC-4626) minimal ABI — object format for viem compatibility
 export const PARENT_VAULT_ABI = [
   // ERC-4626 Standard
-  'function asset() external view returns (address)',
-  'function totalAssets() external view returns (uint256)',
-  'function totalSupply() external view returns (uint256)',
-  'function balanceOf(address account) external view returns (uint256)',
-  'function convertToShares(uint256 assets) external view returns (uint256)',
-  'function convertToAssets(uint256 shares) external view returns (uint256)',
-  'function maxDeposit(address) external view returns (uint256)',
-  'function maxMint(address) external view returns (uint256)',
-  'function maxWithdraw(address owner) external view returns (uint256)',
-  'function maxRedeem(address owner) external view returns (uint256)',
-  'function previewDeposit(uint256 assets) external view returns (uint256)',
-  'function previewMint(uint256 shares) external view returns (uint256)',
-  'function previewWithdraw(uint256 assets) external view returns (uint256)',
-  'function previewRedeem(uint256 shares) external view returns (uint256)',
-  'function deposit(uint256 assets, address receiver) external returns (uint256)',
-  'function mint(uint256 shares, address receiver) external returns (uint256)',
-  'function withdraw(uint256 assets, address receiver, address owner) external returns (uint256)',
-  'function redeem(uint256 shares, address receiver, address owner) external returns (uint256)',
-  
+  {type:'function',name:'asset',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
+  {type:'function',name:'totalAssets',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'totalSupply',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'balanceOf',stateMutability:'view',inputs:[{name:'account',type:'address'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'convertToShares',stateMutability:'view',inputs:[{name:'assets',type:'uint256'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'convertToAssets',stateMutability:'view',inputs:[{name:'shares',type:'uint256'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'maxDeposit',stateMutability:'view',inputs:[{name:'',type:'address'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'maxMint',stateMutability:'view',inputs:[{name:'',type:'address'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'maxWithdraw',stateMutability:'view',inputs:[{name:'owner',type:'address'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'maxRedeem',stateMutability:'view',inputs:[{name:'owner',type:'address'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'previewDeposit',stateMutability:'view',inputs:[{name:'assets',type:'uint256'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'previewMint',stateMutability:'view',inputs:[{name:'shares',type:'uint256'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'previewWithdraw',stateMutability:'view',inputs:[{name:'assets',type:'uint256'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'previewRedeem',stateMutability:'view',inputs:[{name:'shares',type:'uint256'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'deposit',stateMutability:'nonpayable',inputs:[{name:'assets',type:'uint256'},{name:'receiver',type:'address'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'mint',stateMutability:'nonpayable',inputs:[{name:'shares',type:'uint256'},{name:'receiver',type:'address'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'withdraw',stateMutability:'nonpayable',inputs:[{name:'assets',type:'uint256'},{name:'receiver',type:'address'},{name:'owner',type:'address'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'redeem',stateMutability:'nonpayable',inputs:[{name:'shares',type:'uint256'},{name:'receiver',type:'address'},{name:'owner',type:'address'}],outputs:[{name:'',type:'uint256'}]},
   // ERC-20 (shares)
-  'function name() external view returns (string)',
-  'function symbol() external view returns (string)',
-  'function decimals() external view returns (uint8)',
-  'function approve(address spender, uint256 amount) external returns (bool)',
-  'function allowance(address owner, address spender) external view returns (uint256)',
-  'function transfer(address to, uint256 amount) external returns (bool)',
-  'function transferFrom(address from, address to, uint256 amount) external returns (bool)',
-  
+  {type:'function',name:'name',stateMutability:'view',inputs:[],outputs:[{name:'',type:'string'}]},
+  {type:'function',name:'symbol',stateMutability:'view',inputs:[],outputs:[{name:'',type:'string'}]},
+  {type:'function',name:'decimals',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint8'}]},
+  {type:'function',name:'approve',stateMutability:'nonpayable',inputs:[{name:'spender',type:'address'},{name:'amount',type:'uint256'}],outputs:[{name:'',type:'bool'}]},
+  {type:'function',name:'allowance',stateMutability:'view',inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'transfer',stateMutability:'nonpayable',inputs:[{name:'to',type:'address'},{name:'amount',type:'uint256'}],outputs:[{name:'',type:'bool'}]},
+  {type:'function',name:'transferFrom',stateMutability:'nonpayable',inputs:[{name:'from',type:'address'},{name:'to',type:'address'},{name:'amount',type:'uint256'}],outputs:[{name:'',type:'bool'}]},
   // FlareYield specific
-  'function fAssetAdapter() external view returns (address)',
-  'function totalPendingFAssetDeposits() external view returns (uint256)',
-  'function pendingFAssetDeposits(bytes32 depositId) external view returns (address receiver, uint256 queuedAt)',
-  
+  {type:'function',name:'fAssetAdapter',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
+  {type:'function',name:'totalPendingFAssetDeposits',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'pendingFAssetDeposits',stateMutability:'view',inputs:[{name:'depositId',type:'bytes32'}],outputs:[{name:'receiver',type:'address'},{name:'queuedAt',type:'uint256'}]},
   // Events
-  'event Deposit(address indexed sender, address indexed owner, uint256 assets, uint256 shares)',
-  'event Withdraw(address indexed sender, address indexed receiver, address indexed owner, uint256 assets, uint256 shares)',
-  'event FAssetDepositQueued(bytes32 indexed depositId, address indexed receiver)',
-  'event FAssetDepositSettled(bytes32 indexed depositId, address indexed receiver, uint256 assets, uint256 shares)',
+  {type:'event',name:'Deposit',inputs:[{name:'sender',type:'address',indexed:true},{name:'owner',type:'address',indexed:true},{name:'assets',type:'uint256',indexed:false},{name:'shares',type:'uint256',indexed:false}]},
+  {type:'event',name:'Withdraw',inputs:[{name:'sender',type:'address',indexed:true},{name:'receiver',type:'address',indexed:true},{name:'owner',type:'address',indexed:true},{name:'assets',type:'uint256',indexed:false},{name:'shares',type:'uint256',indexed:false}]},
+  {type:'event',name:'FAssetDepositQueued',inputs:[{name:'depositId',type:'bytes32',indexed:true},{name:'receiver',type:'address',indexed:true}]},
+  {type:'event',name:'FAssetDepositSettled',inputs:[{name:'depositId',type:'bytes32',indexed:true},{name:'receiver',type:'address',indexed:true},{name:'assets',type:'uint256',indexed:false},{name:'shares',type:'uint256',indexed:false}]},
 ] as const;
 
-// FAssetAdapter minimal ABI
+// FAssetAdapter minimal ABI — object format for viem compatibility
 export const FASSET_ADAPTER_ABI = [
-  'function vault() external view returns (address)',
-  'function fAsset() external view returns (address)',
-  'function mintingTagManager() external view returns (address)',
-  'function defaultDirectMintExecutor() external view returns (address)',
-  'function registerMintingTag() external payable returns (uint256)',
-  'function tagUser(uint256 tag) external view returns (address)',
-  'function tagExecutor(uint256 tag) external view returns (address)',
-  'function processDirectMint(uint256 tag, bytes32 depositId, uint256 observedMintedAmount) external',
-  'function settleDirectMint(bytes32 depositId) external returns (uint256)',
-  'function pendingDirectMints(bytes32 depositId) external view returns (address receiver, uint256 tag, uint256 assets)',
-  'function setTagExecutor(uint256 tag, address newExecutor) external',
-  
+  {type:'function',name:'vault',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
+  {type:'function',name:'fAsset',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
+  {type:'function',name:'mintingTagManager',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
+  {type:'function',name:'defaultDirectMintExecutor',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
+  {type:'function',name:'registerMintingTag',stateMutability:'payable',inputs:[],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'tagUser',stateMutability:'view',inputs:[{name:'tag',type:'uint256'}],outputs:[{name:'',type:'address'}]},
+  {type:'function',name:'tagExecutor',stateMutability:'view',inputs:[{name:'tag',type:'uint256'}],outputs:[{name:'',type:'address'}]},
+  {type:'function',name:'processDirectMint',stateMutability:'nonpayable',inputs:[{name:'tag',type:'uint256'},{name:'depositId',type:'bytes32'},{name:'observedMintedAmount',type:'uint256'}],outputs:[]},
+  {type:'function',name:'settleDirectMint',stateMutability:'nonpayable',inputs:[{name:'depositId',type:'bytes32'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'pendingDirectMints',stateMutability:'view',inputs:[{name:'depositId',type:'bytes32'}],outputs:[{name:'receiver',type:'address'},{name:'tag',type:'uint256'},{name:'assets',type:'uint256'}]},
+  {type:'function',name:'setTagExecutor',stateMutability:'nonpayable',inputs:[{name:'tag',type:'uint256'},{name:'newExecutor',type:'address'}],outputs:[]},
+  {type:'function',name:'pendingDepositForTag',stateMutability:'view',inputs:[{name:'tag',type:'uint256'}],outputs:[{name:'',type:'bytes32'}]},
   // Events
-  'event MintingTagRegistered(uint256 indexed tag, address indexed user, address indexed executor)',
-  'event DirectMintProcessed(bytes32 indexed depositId, uint256 indexed tag, address indexed receiver, uint256 postFeeAssets)',
-  'event DirectMintSettled(bytes32 indexed depositId, address indexed receiver, uint256 assets, uint256 shares)',
+  {type:'event',name:'MintingTagRegistered',inputs:[{name:'tag',type:'uint256',indexed:true},{name:'user',type:'address',indexed:true},{name:'executor',type:'address',indexed:true}]},
+  {type:'event',name:'DirectMintProcessed',inputs:[{name:'depositId',type:'bytes32',indexed:true},{name:'tag',type:'uint256',indexed:true},{name:'receiver',type:'address',indexed:true},{name:'postFeeAssets',type:'uint256',indexed:false}]},
+  {type:'event',name:'DirectMintSettled',inputs:[{name:'depositId',type:'bytes32',indexed:true},{name:'receiver',type:'address',indexed:true},{name:'assets',type:'uint256',indexed:false},{name:'shares',type:'uint256',indexed:false}]},
 ] as const;
 
-// FXRP (ERC-20) minimal ABI
+// FXRP (ERC-20) minimal ABI — object format for viem compatibility
 export const FXRP_ABI = [
-  'function name() external view returns (string)',
-  'function symbol() external view returns (string)',
-  'function decimals() external view returns (uint8)',
-  'function totalSupply() external view returns (uint256)',
-  'function balanceOf(address account) external view returns (uint256)',
-  'function transfer(address to, uint256 amount) external returns (bool)',
-  'function allowance(address owner, address spender) external view returns (uint256)',
-  'function approve(address spender, uint256 amount) external returns (bool)',
-  'function transferFrom(address from, address to, uint256 amount) external returns (bool)',
-  
+  {type:'function',name:'name',stateMutability:'view',inputs:[],outputs:[{name:'',type:'string'}]},
+  {type:'function',name:'symbol',stateMutability:'view',inputs:[],outputs:[{name:'',type:'string'}]},
+  {type:'function',name:'decimals',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint8'}]},
+  {type:'function',name:'totalSupply',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'balanceOf',stateMutability:'view',inputs:[{name:'account',type:'address'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'transfer',stateMutability:'nonpayable',inputs:[{name:'to',type:'address'},{name:'amount',type:'uint256'}],outputs:[{name:'',type:'bool'}]},
+  {type:'function',name:'allowance',stateMutability:'view',inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'approve',stateMutability:'nonpayable',inputs:[{name:'spender',type:'address'},{name:'amount',type:'uint256'}],outputs:[{name:'',type:'bool'}]},
+  {type:'function',name:'transferFrom',stateMutability:'nonpayable',inputs:[{name:'from',type:'address'},{name:'to',type:'address'},{name:'amount',type:'uint256'}],outputs:[{name:'',type:'bool'}]},
   // Events
-  'event Transfer(address indexed from, address indexed to, uint256 value)',
-  'event Approval(address indexed owner, address indexed spender, uint256 value)',
+  {type:'event',name:'Transfer',inputs:[{name:'from',type:'address',indexed:true},{name:'to',type:'address',indexed:true},{name:'value',type:'uint256',indexed:false}]},
+  {type:'event',name:'Approval',inputs:[{name:'owner',type:'address',indexed:true},{name:'spender',type:'address',indexed:true},{name:'value',type:'uint256',indexed:false}]},
 ] as const;
 
 // AssetManager ABI (for fetching Core Vault XRPL address)
@@ -122,13 +118,13 @@ export const ASSET_MANAGER_ABI = [
   },
 ] as const;
 
-// MintingTagManager minimal ABI
+// MintingTagManager minimal ABI — object format for viem compatibility
 export const MINTING_TAG_MANAGER_ABI = [
-  'function reservationFee() external view returns (uint256)',
-  'function nextAvailableTag() external view returns (uint256)',
-  'function mintingRecipient(uint256 tag) external view returns (address)',
-  'function allowedExecutor(uint256 tag) external view returns (address)',
-  'function reservedTagsForOwner(address owner) external view returns (uint256[])',
+  {type:'function',name:'reservationFee',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'nextAvailableTag',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'mintingRecipient',stateMutability:'view',inputs:[{name:'tag',type:'uint256'}],outputs:[{name:'',type:'address'}]},
+  {type:'function',name:'allowedExecutor',stateMutability:'view',inputs:[{name:'tag',type:'uint256'}],outputs:[{name:'',type:'address'}]},
+  {type:'function',name:'reservedTagsForOwner',stateMutability:'view',inputs:[{name:'owner',type:'address'}],outputs:[{name:'',type:'uint256[]'}]},
 ] as const;
 
 /**

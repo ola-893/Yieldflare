@@ -1,5 +1,5 @@
 import React, {useState, useEffect} from 'react';
-import {useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract} from 'wagmi';
+import {useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract, useBalance} from 'wagmi';
 import {decodeEventLog} from 'viem';
 import {motion, AnimatePresence} from 'motion/react';
 import {Lock, RefreshCw, Check, ArrowRight, Copy, Clock, AlertCircle} from 'lucide-react';
@@ -23,6 +23,15 @@ const EVENT_ABI = [{
 interface DepositPageProps {
   onBack: () => void;
 }
+
+/** Format wei as human-readable C2FLR (18 decimals) */
+const formatC2FLR = (wei: bigint): string => {
+  const whole = wei / 10n ** 18n;
+  const frac = wei % 10n ** 18n;
+  if (frac === 0n) return whole.toString();
+  const fracStr = frac.toString().padStart(18, '0').slice(0, 6).replace(/0+$/, '');
+  return `${whole}.${fracStr}`;
+};
 
 // Fetches the FAsset Core Vault XRPL address from Flare's AssetManager contract
 const useCoreVaultAddress = () => {
@@ -79,7 +88,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   // Read the actual reservation fee from the MintingTagManager contract
   const {data: reservationFeeRaw, isLoading: isFeeLoading, error: feeError} = useReadContract({
     address: CONTRACTS.mintingTagManager,
-    abi: MINTING_TAG_MANAGER_ABI as any,
+    abi: MINTING_TAG_MANAGER_ABI,
     functionName: 'reservationFee',
     query: {
       retry: 2,
@@ -88,6 +97,11 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   });
   // Fall back to 0 if the read fails (e.g. contract doesn't expose the function)
   const reservationFee: bigint = (reservationFeeRaw as bigint | undefined) ?? 0n;
+
+  // Check user's native C2FLR balance
+  const {data: balanceData} = useBalance({address});
+  const nativeBalance = balanceData?.value ?? 0n;
+  const hasEnoughBalance = nativeBalance >= reservationFee;
 
   // Auto-recover from rejected/failed transactions
   useEffect(() => {
@@ -101,7 +115,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const isDeployed = CONTRACTS.fAssetAdapter !== '0x0000000000000000000000000000000000000000';
   const {data: pendingDepositRaw} = useReadContract({
     address: CONTRACTS.fAssetAdapter,
-    abi: FASSET_ADAPTER_ABI as any,
+    abi: FASSET_ADAPTER_ABI,
     functionName: 'pendingDepositForTag',
     args: reservedTag ? [BigInt(reservedTag)] : undefined,
     query: {
@@ -164,24 +178,25 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   }, [settleHash, isSettleConfirming]);
 
   const handleReserveTag = () => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerTag({
       address: CONTRACTS.fAssetAdapter,
       abi: FASSET_ADAPTER_ABI as any,
       functionName: 'registerMintingTag',
       value: reservationFee,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      gas: 500_000n,
     } as any);
     setStep('RESERVE_TAG');
   };
 
   const handleSettle = () => {
     if (!depositId) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     settleMint({
       address: CONTRACTS.fAssetAdapter,
       abi: FASSET_ADAPTER_ABI as any,
       functionName: 'settleDirectMint',
       args: [depositId as `0x${string}`],
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any);
     setStep('SETTLING');
   };
@@ -267,6 +282,8 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
               isRegistering={isRegistering || isRegisterConfirming}
               isFeeLoading={isFeeLoading && !feeError}
               feeError={!!feeError}
+              reservationFee={reservationFee}
+              hasEnoughBalance={hasEnoughBalance}
             />
           )}
 
@@ -362,7 +379,9 @@ const StepSelectAsset: React.FC<{
   isRegistering: boolean;
   isFeeLoading: boolean;
   feeError: boolean;
-}> = ({asset, setAsset, onReserve, isRegistering, isFeeLoading, feeError}) => (
+  reservationFee: bigint;
+  hasEnoughBalance: boolean;
+}> = ({asset, setAsset, onReserve, isRegistering, isFeeLoading, feeError, reservationFee, hasEnoughBalance}) => (
   <motion.div
     initial={{opacity: 0, y: 20}}
     animate={{opacity: 1, y: 0}}
@@ -404,9 +423,21 @@ const StepSelectAsset: React.FC<{
       </div>
     )}
 
+    {!feeError && !isFeeLoading && reservationFee > 0n && (
+      <div className="p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10 mb-6">
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-[#4A4A4A]">Tag Reservation Fee</span>
+          <span className="font-mono font-bold text-[#1E1E1E]">{formatC2FLR(reservationFee)} C2FLR</span>
+        </div>
+        {!hasEnoughBalance && (
+          <p className="text-[10px] text-red-600 mt-1 font-bold">Insufficient C2FLR balance for this transaction</p>
+        )}
+      </div>
+    )}
+
     <button
       onClick={onReserve}
-      disabled={isRegistering}
+      disabled={isRegistering || (!isFeeLoading && !hasEnoughBalance && reservationFee > 0n)}
       className="w-full py-3.5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-[#000000] transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
     >
       {isRegistering ? (
