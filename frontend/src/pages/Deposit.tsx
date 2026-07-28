@@ -69,7 +69,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
 
   // Poll for pending deposit (only when contract address is deployed)
   const isDeployed = CONTRACTS.fAssetAdapter !== '0x0000000000000000000000000000000000000000';
-  const {data: pendingDeposit} = useReadContract({
+  const {data: pendingDepositRaw} = useReadContract({
     address: CONTRACTS.fAssetAdapter,
     abi: FASSET_ADAPTER_ABI as any,
     functionName: 'pendingDepositForTag',
@@ -79,6 +79,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
       refetchInterval: 5000,
     },
   });
+  const pendingDeposit = pendingDepositRaw as string | undefined;
 
   // Check if deposit is ready to settle
   useEffect(() => {
@@ -93,16 +94,17 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   useEffect(() => {
     if (registerReceipt && !isRegisterConfirming && step === 'RESERVE_TAG') {
       try {
-        let actualTag = '';
+        let actualTag: string = '';
         for (const log of registerReceipt.logs) {
           try {
-            const decoded = decodeEventLog({
-              abi: FASSET_ADAPTER_ABI,
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            const decoded: any = decodeEventLog({
+              abi: FASSET_ADAPTER_ABI as any,
               data: log.data,
               topics: log.topics,
             });
-            if (decoded.eventName === 'MintingTagRegistered') {
-              actualTag = (decoded.args as any).tag.toString();
+            if (decoded?.eventName === 'MintingTagRegistered') {
+              actualTag = decoded.args.tag.toString();
               break;
             }
           } catch (e) {
