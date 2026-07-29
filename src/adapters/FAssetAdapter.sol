@@ -4,12 +4,14 @@ pragma solidity ^0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import "forge-std/console.sol";
 import {Pausable} from "@openzeppelin/contracts/utils/Pausable.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
 import {IFAssetAdapter} from "../interfaces/IFAssetAdapter.sol";
 import {IMintingTagManager} from "../interfaces/IMintingTagManager.sol";
 import {IParentVault} from "../interfaces/IParentVault.sol";
+import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 
 /**
  * @title FAssetAdapter
@@ -18,7 +20,7 @@ import {IParentVault} from "../interfaces/IParentVault.sol";
  *      the Flare AssetManager operation. The adapter verifies the FAsset balance delta before queuing
  *      it, so the amount that reaches ERC-4626 is the real post-fee amount rather than a quoted amount.
  */
-contract FAssetAdapter is IFAssetAdapter, Ownable, Pausable, ReentrancyGuard {
+contract FAssetAdapter is IFAssetAdapter, Ownable, Pausable, ReentrancyGuard, IERC721Receiver {
     using SafeERC20 for IERC20;
 
     struct PendingDirectMint {
@@ -98,6 +100,7 @@ contract FAssetAdapter is IFAssetAdapter, Ownable, Pausable, ReentrancyGuard {
         if (msg.value != reservationFee) revert IncorrectReservationFee(reservationFee, msg.value);
 
         tag = mintingTagManager.reserve{value: msg.value}();
+
         mintingTagManager.setMintingRecipient(tag, address(this));
         mintingTagManager.setAllowedExecutor(tag, defaultDirectMintExecutor);
 
@@ -204,5 +207,14 @@ contract FAssetAdapter is IFAssetAdapter, Ownable, Pausable, ReentrancyGuard {
 
     function unpause() external onlyOwner {
         _unpause();
+    }
+
+    function onERC721Received(
+        address,
+        address,
+        uint256,
+        bytes calldata
+    ) external pure override returns (bytes4) {
+        return IERC721Receiver.onERC721Received.selector;
     }
 }
