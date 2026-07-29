@@ -13,10 +13,10 @@ export const COSTON2_CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID) || 114;
  */
 export const CONTRACTS = {
   // ParentVault - ERC-4626 vault (proxy)
-  parentVault: import.meta.env.VITE_PARENT_VAULT_ADDRESS || '0xdD227AC6660510985FE035A01e2cE7bbE75C78d4',
+  parentVault: import.meta.env.VITE_PARENT_VAULT_ADDRESS || '0x01f64160E4928Eba5607aE294F9B66090Dc323B3',
   
   // FAssetAdapter - Direct minting integration
-  fAssetAdapter: import.meta.env.VITE_FASSET_ADAPTER_ADDRESS || '0x38e37aff09a57efEfa62cE19AdEEef3bfc008369',
+  fAssetAdapter: import.meta.env.VITE_FASSET_ADAPTER_ADDRESS || '0x4CE2d84CE6bc2Eb2e6923d032CDb10CcE9e418D6',
   
   // FXRP Token (Flare-wrapped XRP)
   fxrp: import.meta.env.VITE_FXRP_ADDRESS || '0x0b6A3645c240605887a5532109323A3E12273dc7',
