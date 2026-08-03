@@ -15,8 +15,8 @@ export const CONTRACTS = {
   // ParentVault - ERC-4626 vault (proxy)
   parentVault: import.meta.env.VITE_PARENT_VAULT_ADDRESS || '0x01f64160E4928Eba5607aE294F9B66090Dc323B3',
   
-  // FAssetAdapter - Direct minting integration
-  fAssetAdapter: import.meta.env.VITE_FASSET_ADAPTER_ADDRESS || '0x4CE2d84CE6bc2Eb2e6923d032CDb10CcE9e418D6',
+  // FAssetAdapter - Direct minting integration (with IERC721Receiver fix)
+  fAssetAdapter: import.meta.env.VITE_FASSET_ADAPTER_ADDRESS || '0x02D4F85301A2d1b3Bcc40BfD7937e6Fb2F5224a7',
   
   // FXRP Token (Flare-wrapped XRP)
   fxrp: import.meta.env.VITE_FXRP_ADDRESS || '0x0b6A3645c240605887a5532109323A3E12273dc7',

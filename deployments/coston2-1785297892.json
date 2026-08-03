@@ -3,11 +3,11 @@
   "chainId": 114,
   "daoMultisig": "0x506e724d7FDdbF91B6607d5Af0700d385D952f8a",
   "defaultExecutor": "0x506e724d7FDdbF91B6607d5Af0700d385D952f8a",
-  "fAssetAdapter": "0x02D4F85301A2d1b3Bcc40BfD7937e6Fb2F5224a7",
+  "fAssetAdapter": "0x4CE2d84CE6bc2Eb2e6923d032CDb10CcE9e418D6",
   "fccSigner": "0x506e724d7FDdbF91B6607d5Af0700d385D952f8a",
   "fxrp": "0x0b6A3645c240605887a5532109323A3E12273dc7",
   "mintingTagManager": "0x094511737909b626391106bBc21B25feb2D67B96",
   "network": "Coston2",
-  "parentVault": "0xdD227AC6660510985FE035A01e2cE7bbE75C78d4",
-  "parentVaultImplementation": "0x092C790d51CBf208a47edaB20d1e9c4C73737081"
+  "parentVault": "0x01f64160E4928Eba5607aE294F9B66090Dc323B3",
+  "parentVaultImplementation": "0x0653DfFB646122155dfd0330402De8b32178eE54"
 }
