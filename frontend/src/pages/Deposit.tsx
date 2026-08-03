@@ -51,18 +51,26 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const [reservedTag, setReservedTag] = useState<string | null>(null);
   const [depositId, setDepositId] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [xrplTxHash, setXrplTxHash] = useState<string | null>(null);
+  const [xrplAmount, setXrplAmount] = useState<string | null>(null);
 
-  // Persist state across refreshes
+  // Persist state across refreshes — if user has a registered tag, go straight to Awaiting
   useEffect(() => {
     const saved = localStorage.getItem('flux-deposit-state');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
         if (parsed.step && parsed.tag) {
-          setStep(parsed.step);
           setReservedTag(parsed.tag);
           setAsset(parsed.asset || 'XRP');
-          setDepositId(parsed.depositId || null);
+          // If previous deposit is complete or settled, start a new deposit with same tag
+          if (parsed.step === 'COMPLETE' || parsed.step === 'SETTLING') {
+            setStep('AWAITING_DEPOSIT');
+            setDepositId(null);
+          } else {
+            setStep(parsed.step);
+            setDepositId(parsed.depositId || null);
+          }
         }
       } catch { /* ignore */ }
     }
@@ -79,7 +87,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
 
   // Register minting tag
   const {writeContract: registerTag, data: registerHash, isPending: isRegistering, error: registerError} = useWriteContract();
-  const {isLoading: isRegisterConfirming, data: registerReceipt} = useWaitForTransactionReceipt({hash: registerHash});
+  const {isLoading: isRegisterConfirming, data: registerReceipt, error: registerReceiptError} = useWaitForTransactionReceipt({hash: registerHash});
 
   // Settle direct mint
   const {writeContract: settleMint, data: settleHash, isPending: isSettling} = useWriteContract();
@@ -103,13 +111,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const nativeBalance = balanceData?.value ?? 0n;
   const hasEnoughBalance = nativeBalance >= reservationFee;
 
-  // Auto-recover from rejected/failed transactions
-  useEffect(() => {
-    if (step === 'RESERVE_TAG' && registerError) {
-      const timer = setTimeout(() => setStep('SELECT'), 3000);
-      return () => clearTimeout(timer);
-    }
-  }, [step, registerError]);
+  // No auto-recovery timers - show error UI and let user decide
 
   // Poll for pending deposit (only when contract address is deployed)
   const isDeployed = CONTRACTS.fAssetAdapter !== '0x0000000000000000000000000000000000000000';
@@ -209,6 +211,31 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
     }
   };
 
+  // Fetch the FAsset Core Vault XRPL address (must be above early return per React Rules of Hooks)
+  const {coreVaultAddress, isLoading: isVaultLoading} = useCoreVaultAddress();
+  const [vaultCopied, setVaultCopied] = useState(false);
+
+  // Read deposit amount from FAssetAdapter contract (faster than XRPL API)
+  const {data: pendingDirectMint} = useReadContract({
+    address: CONTRACTS.fAssetAdapter,
+    abi: FASSET_ADAPTER_ABI,
+    functionName: 'pendingDirectMints',
+    args: depositId ? [depositId as `0x${string}`] : undefined,
+    query: {
+      enabled: step === 'READY_TO_SETTLE' && !!depositId,
+    },
+  });
+
+  // Set amount from contract data (assets is in 6 decimals for FXRP)
+  useEffect(() => {
+    if (pendingDirectMint && step === 'READY_TO_SETTLE') {
+      const assets = (pendingDirectMint as any)[2]; // third return value is assets (uint256)
+      if (assets && assets > 0n) {
+        setXrplAmount((Number(assets) / 1e6).toFixed(6)); // FXRP has 6 decimals
+      }
+    }
+  }, [pendingDirectMint, step]);
+
   const handleReset = () => {
     localStorage.removeItem('flux-deposit-state');
     setStep('SELECT');
@@ -216,9 +243,14 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
     setDepositId(null);
   };
 
-  // Fetch the FAsset Core Vault XRPL address (must be above early return per React Rules of Hooks)
-  const {coreVaultAddress, isLoading: isVaultLoading} = useCoreVaultAddress();
-  const [vaultCopied, setVaultCopied] = useState(false);
+  // Start a new deposit using the existing registered tag (no re-registration needed)
+  const handleNewDeposit = () => {
+    setDepositId(null);
+    setXrplTxHash(null);
+    setXrplAmount(null);
+    setStep('AWAITING_DEPOSIT');
+    saveState('AWAITING_DEPOSIT');
+  };
 
   if (!isConnected) {
     return (
@@ -290,8 +322,10 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
           {step === 'RESERVE_TAG' && (
             <StepReserving
               key="reserving"
-              error={registerError?.message}
+              isConfirming={isRegisterConfirming}
+              error={registerError?.message || registerReceiptError?.message}
               onRetry={handleReserveTag}
+              onBack={() => setStep('SELECT')}
             />
           )}
 
@@ -313,6 +347,9 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
             <StepReadyToSettle
               key="settle"
               depositId={depositId!}
+              xrplTxHash={xrplTxHash}
+              xrplAmount={xrplAmount}
+              asset={asset}
               onSettle={handleSettle}
               isSettling={isSettling || isSettleConfirming}
             />
@@ -323,7 +360,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
           )}
 
           {step === 'COMPLETE' && (
-            <StepComplete key="complete" asset={asset} onReset={handleReset} onBack={onBack} />
+            <StepComplete key="complete" asset={asset} onReset={handleReset} onBack={onBack} onNewDeposit={handleNewDeposit} />
           )}
         </AnimatePresence>
 
@@ -461,34 +498,65 @@ const StepSelectAsset: React.FC<{
 );
 
 // Step: Reserving Tag
-const StepReserving: React.FC<{error?: string | null; onRetry?: () => void}> = ({error, onRetry}) => (
+const StepReserving: React.FC<{
+  isConfirming?: boolean;
+  error?: string | null;
+  onRetry?: () => void;
+  onBack?: () => void;
+}> = ({isConfirming, error, onRetry, onBack}) => (
   <motion.div
     initial={{opacity: 0, y: 20}}
     animate={{opacity: 1, y: 0}}
     exit={{opacity: 0, y: -20}}
     className="glass-panel p-8 rounded-3xl border border-[#1E1E1E]/15 shadow-soft-editorial bg-white/60 text-center"
   >
-    <div className="w-16 h-16 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center mx-auto mb-4 animate-spin">
-      <RefreshCw className="w-8 h-8 text-[#E1BAC2]" />
-    </div>
-    <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
-      Reserving your minting tag
-    </h3>
-    <p className="text-xs text-[#4A4A4A] mb-4">
-      Confirm the transaction in your wallet. This registers a unique destination tag on Flare's MintingTagManager.
-    </p>
-    {error && (
-      <div className="p-3 rounded-xl bg-red-50 border border-red-200 mb-4">
-        <p className="text-xs text-red-700">{error}</p>
-        {onRetry && (
-          <button
-            onClick={onRetry}
-            className="mt-2 text-xs font-bold text-red-600 hover:text-red-800 underline"
-          >
-            Try Again
-          </button>
-        )}
-      </div>
+    {!error ? (
+      <>
+        <div className="w-16 h-16 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center mx-auto mb-4 animate-spin">
+          <RefreshCw className="w-8 h-8 text-[#E1BAC2]" />
+        </div>
+        <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
+          {isConfirming ? 'Confirming transaction...' : 'Reserving your minting tag'}
+        </h3>
+        <p className="text-xs text-[#4A4A4A] mb-4">
+          {isConfirming
+            ? 'Transaction submitted. Waiting for on-chain confirmation...'
+            : 'Confirm the transaction in your wallet. This registers a unique destination tag on Flare.'}
+        </p>
+      </>
+    ) : (
+      <>
+        <div className="w-16 h-16 rounded-full bg-red-50 border border-red-200 flex items-center justify-center mx-auto mb-4">
+          <AlertCircle className="w-8 h-8 text-red-500" />
+        </div>
+        <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
+          Transaction Failed
+        </h3>
+        <p className="text-xs text-[#4A4A4A] mb-4">
+          The minting tag reservation failed. This could be due to insufficient balance, a network issue, or a contract error.
+        </p>
+        <div className="p-3 rounded-xl bg-red-50 border border-red-200 mb-6">
+          <p className="text-xs text-red-700 font-mono break-all">{error}</p>
+        </div>
+        <div className="flex gap-3">
+          {onBack && (
+            <button
+              onClick={onBack}
+              className="flex-1 py-3 rounded-full border border-[#1E1E1E]/20 text-[#1E1E1E] text-[11px] font-bold uppercase tracking-[0.15em] hover:border-[#E1BAC2] transition-all"
+            >
+              Go Back
+            </button>
+          )}
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              className="flex-1 py-3 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.15em] hover:bg-[#000000] transition-all shadow-md"
+            >
+              Try Again
+            </button>
+          )}
+        </div>
+      </>
     )}
   </motion.div>
 );
@@ -591,53 +659,80 @@ const StepAwaitingDeposit: React.FC<{
 // Step: Ready to Settle
 const StepReadyToSettle: React.FC<{
   depositId: string;
+  xrplTxHash: string | null;
+  xrplAmount: string | null;
+  asset: 'XRP' | 'BTC';
   onSettle: () => void;
   isSettling: boolean;
-}> = ({depositId, onSettle, isSettling}) => (
-  <motion.div
-    initial={{opacity: 0, y: 20}}
-    animate={{opacity: 1, y: 0}}
-    exit={{opacity: 0, y: -20}}
-    className="glass-panel p-6 sm:p-8 rounded-3xl border border-emerald-500/30 shadow-soft-editorial bg-white/60"
-  >
-    <div className="text-center mb-8">
-      <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
-        <Check className="w-8 h-8 text-emerald-600" />
-      </div>
-      <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
-        FAssets received!
-      </h3>
-      <p className="text-xs text-[#4A4A4A]">
-        Your deposit has been processed. Click below to settle and receive your ERC-4626 vault shares.
-      </p>
-    </div>
+}> = ({depositId, xrplTxHash, xrplAmount, asset, onSettle, isSettling}) => {
+  const xrplExplorerUrl = xrplTxHash ? `https://testnet.xrpl.org/transactions/${xrplTxHash}` : null;
 
-    <div className="p-4 rounded-2xl bg-[#F5F5F3] border border-[#1E1E1E]/10 mb-6">
-      <div className="flex items-center justify-between text-xs">
-        <span className="text-[#4A4A4A]">Deposit ID:</span>
-        <span className="font-mono text-[#1E1E1E]">{depositId.slice(0, 10)}...{depositId.slice(-6)}</span>
-      </div>
-    </div>
-
-    <button
-      onClick={onSettle}
-      disabled={isSettling}
-      className="w-full py-3.5 rounded-full bg-emerald-600 text-white text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-emerald-700 transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+  return (
+    <motion.div
+      initial={{opacity: 0, y: 20}}
+      animate={{opacity: 1, y: 0}}
+      exit={{opacity: 0, y: -20}}
+      className="glass-panel p-6 sm:p-8 rounded-3xl border border-emerald-500/30 shadow-soft-editorial bg-white/60"
     >
-      {isSettling ? (
-        <>
-          <RefreshCw className="w-4 h-4 animate-spin" />
-          <span>Settling Deposit...</span>
-        </>
-      ) : (
-        <>
-          <span>Settle & Receive Shares</span>
-          <ArrowRight className="w-4 h-4" />
-        </>
-      )}
-    </button>
-  </motion.div>
-);
+      <div className="text-center mb-8">
+        <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
+          <Check className="w-8 h-8 text-emerald-600" />
+        </div>
+        <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
+          FAssets received!
+        </h3>
+        <p className="text-xs text-[#4A4A4A]">
+          Your deposit has been processed. Click below to settle and receive your ERC-4626 vault shares.
+        </p>
+      </div>
+
+      {/* Deposit Details */}
+      <div className="p-4 rounded-2xl bg-[#F5F5F3] border border-[#1E1E1E]/10 mb-6 space-y-3">
+        {xrplAmount && (
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[#4A4A4A]">Amount Deposited</span>
+            <span className="font-mono font-bold text-[#1E1E1E]">{xrplAmount} {asset}</span>
+          </div>
+        )}
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-[#4A4A4A]">Deposit ID</span>
+          <span className="font-mono text-[#1E1E1E]">{depositId.slice(0, 10)}...{depositId.slice(-6)}</span>
+        </div>
+        {xrplExplorerUrl && (
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[#4A4A4A]">XRPL Transaction</span>
+            <a
+              href={xrplExplorerUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="font-mono text-emerald-700 hover:text-emerald-900 underline underline-offset-2 transition-colors"
+            >
+              {xrplTxHash!.slice(0, 8)}...{xrplTxHash!.slice(-6)} ↗
+            </a>
+          </div>
+        )}
+      </div>
+
+      <button
+        onClick={onSettle}
+        disabled={isSettling}
+        className="w-full py-3.5 rounded-full bg-emerald-600 text-white text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-emerald-700 transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+      >
+        {isSettling ? (
+          <>
+            <RefreshCw className="w-4 h-4 animate-spin" />
+            <span>Settling Deposit...</span>
+          </>
+        ) : (
+          <>
+            <span>Settle & Receive Shares</span>
+            <ArrowRight className="w-4 h-4" />
+          </>
+        )}
+      </button>
+    </motion.div>
+  );
+};
 
 // Step: Settling
 const StepSettling: React.FC = () => (
@@ -664,7 +759,8 @@ const StepComplete: React.FC<{
   asset: 'XRP' | 'BTC';
   onReset: () => void;
   onBack: () => void;
-}> = ({asset, onReset, onBack}) => (
+  onNewDeposit: () => void;
+}> = ({asset, onReset, onBack, onNewDeposit}) => (
   <motion.div
     initial={{opacity: 0, y: 20}}
     animate={{opacity: 1, y: 0}}
@@ -696,16 +792,16 @@ const StepComplete: React.FC<{
 
     <div className="grid grid-cols-2 gap-3">
       <button
-        onClick={onBack}
+        onClick={onNewDeposit}
         className="py-3 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.15em] hover:bg-[#000000] transition-all"
       >
-        View Dashboard
+        Deposit Again (Same Tag)
       </button>
       <button
-        onClick={onReset}
+        onClick={onBack}
         className="py-3 rounded-full border border-[#1E1E1E]/20 text-[#1E1E1E] text-[11px] font-bold uppercase tracking-[0.15em] hover:border-[#E1BAC2] transition-all"
       >
-        Deposit More
+        View Dashboard
       </button>
     </div>
   </motion.div>

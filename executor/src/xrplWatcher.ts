@@ -177,13 +177,31 @@ export class XrplWatcher {
     if (tag === undefined || tag === null || typeof tag !== 'number') return null;
 
     // Get the delivered amount (string of drops for XRP)
+    // Try multiple sources: delivered_amount (metadata) > Amount (tx) > amount (alt)
     let amountDrops = '0';
-    const amount = tx.Amount;
-    if (typeof amount === 'string') {
-      amountDrops = amount; // native XRP in drops
-    } else if (typeof amount === 'object' && amount.value) {
-      // IOU — not what we expect for direct minting, but handle gracefully
-      amountDrops = '0';
+    const meta = entry.meta as any;
+
+    // 1. Prefer delivered_amount from metadata (most accurate for partial payments)
+    if (meta?.delivered_amount) {
+      const delivered = meta.delivered_amount;
+      if (typeof delivered === 'string') {
+        amountDrops = delivered; // native XRP in drops
+      } else if (delivered?.value && delivered?.currency === 'XRP') {
+        amountDrops = String(Number(delivered.value) * 1_000_000); // convert XRP to drops
+      }
+    }
+
+    // 2. Fall back to tx.Amount
+    if (amountDrops === '0') {
+      const amount = tx.Amount;
+      if (typeof amount === 'string') {
+        amountDrops = amount; // native XRP in drops
+      } else if (typeof amount === 'number') {
+        amountDrops = String(amount); // already in drops as a number
+      } else if (typeof amount === 'object' && amount?.value) {
+        // IOU — not what we expect for direct minting
+        amountDrops = '0';
+      }
     }
 
     const hash = tx.hash ?? tx.Hash ?? (entry as any).hash ?? '';

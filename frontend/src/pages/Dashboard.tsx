@@ -51,11 +51,20 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
     query: {enabled: isDeployed},
   });
 
-  // Calculate share price and user value (use formatUnits to avoid BigInt precision loss)
+  // Read actual decimals from the vault (e.g. 6 for FXRP, not hardcoded 18)
+  const {data: vaultDecimals} = useReadContract({
+    address: PARENT_VAULT_ADDRESS,
+    abi: PARENT_VAULT_ABI,
+    functionName: 'decimals',
+    query: {enabled: isDeployed},
+  });
+  const decimals = vaultDecimals ?? 18;
+
+  // Calculate share price and user value (use actual vault decimals)
   const sharePrice = totalAssets && totalSupply && totalSupply > 0n
-    ? Number(formatUnits(totalAssets, 18)) / Number(formatUnits(totalSupply, 18))
+    ? Number(formatUnits(totalAssets, decimals)) / Number(formatUnits(totalSupply, decimals))
     : 1;
-  const userShareBalance = userShares ? Number(formatUnits(userShares, 18)) : 0;
+  const userShareBalance = userShares ? Number(formatUnits(userShares, decimals)) : 0;
   const userValueUsd = userShareBalance * sharePrice;
 
   // Strategy name mapping
@@ -170,7 +179,7 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
           />
           <StatCard
             label="Total Vault Assets"
-            value={totalAssets ? `${formatUnits(totalAssets, 18).slice(0, 10)}` : '0'}
+            value={totalAssets ? `${formatUnits(totalAssets, decimals).slice(0, 10)}` : '0'}
             suffix=""
             subtext="Underlying asset value"
             icon={<RefreshCw className="w-5 h-5" />}
