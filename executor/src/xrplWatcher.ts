@@ -36,7 +36,7 @@ export class XrplWatcher {
     coreVaultAddress: string;
     pollIntervalMs?: number;
   }) {
-    this.client = new Client(opts.wssUrl);
+    this.client = new Client(opts.wssUrl, { connectionTimeout: 20000 });
     this.coreVaultAddress = opts.coreVaultAddress;
     this.pollIntervalMs = opts.pollIntervalMs ?? 15_000;
   }
@@ -50,24 +50,29 @@ export class XrplWatcher {
   async start(): Promise<void> {
     this.running = true;
     console.log(`[XRPL] Connecting to ${(this.client as any).url ?? 'XRPL'}...`);
-    await this.client.connect();
-    console.log(`[XRPL] Connected.  Watching payments to ${this.coreVaultAddress}`);
-
-    // Try subscribing to the account for real-time events
     try {
-      await this.client.request({
-        command: 'subscribe',
-        accounts: [this.coreVaultAddress],
-      });
-      console.log(`[XRPL] Subscribed to real-time account events.`);
+      await this.client.connect();
+      console.log(`[XRPL] Connected.  Watching payments to ${this.coreVaultAddress}`);
 
-      this.client.on('transaction', (tx) => {
-        this.handleTxEvent(tx).catch((err) =>
-          console.error('[XRPL] Error handling tx event:', err)
-        );
-      });
-    } catch (err) {
-      console.warn('[XRPL] WebSocket subscribe failed, falling back to polling:', err);
+      // Try subscribing to the account for real-time events
+      try {
+        await this.client.request({
+          command: 'subscribe',
+          accounts: [this.coreVaultAddress],
+        });
+        console.log(`[XRPL] Subscribed to real-time account events.`);
+
+        this.client.on('transaction', (tx) => {
+          this.handleTxEvent(tx).catch((err) =>
+            console.error('[XRPL] Error handling tx event:', err)
+          );
+        });
+      } catch (err) {
+        console.warn('[XRPL] WebSocket subscribe failed, falling back to polling:', err);
+      }
+    } catch (err: any) {
+      console.warn(`[XRPL] Initial WebSocket connection error: ${err.message ?? err}`);
+      console.warn(`[XRPL] Continuing with background RPC polling fallback...`);
     }
 
     // Always run polling as a safety net

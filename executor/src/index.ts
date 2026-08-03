@@ -3,12 +3,18 @@
  *
  * Initializes the XRPL watcher and Flare executor, then bridges incoming
  * XRPL payments into Flare's FAssetAdapter on Coston2.
- *
- * Usage:
- *   cp .env.example .env   # fill in values
- *   npm install
- *   npm start              # or: npm run dev (with watch)
  */
+
+import { existsSync, copyFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+
+// Ensure .env exists by copying .env.example if missing
+const envPath = resolve(process.cwd(), '.env');
+const envExamplePath = resolve(process.cwd(), '.env.example');
+if (!existsSync(envPath) && existsSync(envExamplePath)) {
+  console.log('[Init] .env file missing — auto-creating from .env.example...');
+  copyFileSync(envExamplePath, envPath);
+}
 
 import 'dotenv/config';
 import { createPublicClient, http, type Address } from 'viem';
@@ -28,11 +34,11 @@ function requireEnv(name: string): string {
   return value;
 }
 
-const EXECUTOR_PRIVATE_KEY = requireEnv('EXECUTOR_PRIVATE_KEY') as `0x${string}`;
-const COSTON2_RPC_URL = requireEnv('COSTON2_RPC_URL');
-const FASSET_ADAPTER_ADDRESS = requireEnv('FASSET_ADAPTER_ADDRESS') as Address;
-const FXRP_ADDRESS = requireEnv('FXRP_ADDRESS') as Address;
-const ASSET_MANAGER_ADDRESS = process.env.ASSET_MANAGER_ADDRESS as Address | undefined;
+const EXECUTOR_PRIVATE_KEY = (process.env.EXECUTOR_PRIVATE_KEY || '0xce44c9cf317f66b5e3ea12ee1c92bb77a6dd2d02265b086eba66f8f338d5d7dc') as `0x${string}`;
+const COSTON2_RPC_URL = process.env.COSTON2_RPC_URL || 'https://coston2-api.flare.network/ext/C/rpc';
+const FASSET_ADAPTER_ADDRESS = (process.env.FASSET_ADAPTER_ADDRESS || '0x02D4F85301A2d1b3Bcc40BfD7937e6Fb2F5224a7') as Address;
+const FXRP_ADDRESS = (process.env.FXRP_ADDRESS || '0x0b6A3645c240605887a5532109323A3E12273dc7') as Address;
+const ASSET_MANAGER_ADDRESS = (process.env.ASSET_MANAGER_ADDRESS || '0xc1Ca88b937d0b528842F95d5731ffB586f4fbDFA') as Address;
 const XRPL_WSS_URL = process.env.XRPL_WSS_URL ?? 'wss://s.altnet.rippletest.net:51233';
 const POLL_INTERVAL_MS = parseInt(process.env.POLL_INTERVAL_MS ?? '15000', 10);
 

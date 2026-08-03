@@ -202,48 +202,14 @@ export class FlareExecutor {
 
     console.log(`${logPrefix} Provisioning ${formatUnits(fxrpAmount, decimals)} FXRP to FAssetAdapter...`);
 
-    // Check executor has enough FXRP
-    const executorBalance = await this.publicClient.readContract({
-      address: this.fxrp,
-      abi: ERC20_ABI,
-      functionName: 'balanceOf',
-      args: [this.account.address],
-    });
-
-    if (executorBalance < fxrpAmount) {
-      console.error(
-        `${logPrefix} Executor has insufficient FXRP: ` +
-        `${formatUnits(executorBalance, decimals)} < ${formatUnits(fxrpAmount, decimals)}`
-      );
-      console.error(`${logPrefix} Fund the executor wallet (${this.account.address}) with test FXRP.`);
-      return false;
-    }
-
-    // Transfer FXRP to FAssetAdapter
-    const transferHash = await this.walletClient.writeContract({
-      chain: coston2,
-      account: this.account,
-      address: this.fxrp,
-      abi: ERC20_ABI,
-      functionName: 'transfer',
-      args: [this.fAssetAdapter, fxrpAmount],
-    });
-
-    console.log(`${logPrefix} FXRP transfer tx: ${transferHash}`);
-    const transferReceipt = await this.publicClient.waitForTransactionReceipt({ hash: transferHash });
-
-    if (transferReceipt.status !== 'success') {
-      console.error(`${logPrefix} FXRP transfer REVERTED.`);
-      return false;
-    }
-    console.log(`${logPrefix} FXRP transfer confirmed in block ${transferReceipt.blockNumber}.`);
-
-    // ── 4. Read exact unallocated balance ──────────────────────────
-    //
-    // processDirectMint() requires: observedMintedAmount == (balanceOf - totalPendingFAssets)
-    // We read BOTH values and compute the delta to match exactly.
-
-    const [adapterBalance, totalPending] = await Promise.all([
+    // Check current balances
+    const [executorBalance, adapterBalance, totalPending] = await Promise.all([
+      this.publicClient.readContract({
+        address: this.fxrp,
+        abi: ERC20_ABI,
+        functionName: 'balanceOf',
+        args: [this.account.address],
+      }),
       this.publicClient.readContract({
         address: this.fxrp,
         abi: ERC20_ABI,
@@ -257,7 +223,65 @@ export class FlareExecutor {
       }),
     ]);
 
-    const observedMintedAmount = adapterBalance - totalPending;
+    const availableAdapterFxrp = adapterBalance > totalPending ? adapterBalance - totalPending : 0n;
+
+    if (executorBalance >= fxrpAmount) {
+      // Transfer FXRP from executor to FAssetAdapter
+      console.log(`${logPrefix} Transferring ${formatUnits(fxrpAmount, decimals)} FXRP to FAssetAdapter...`);
+      const transferHash = await this.walletClient.writeContract({
+        chain: coston2,
+        account: this.account,
+        address: this.fxrp,
+        abi: ERC20_ABI,
+        functionName: 'transfer',
+        args: [this.fAssetAdapter, fxrpAmount],
+      });
+
+      console.log(`${logPrefix} FXRP transfer tx: ${transferHash}`);
+      const transferReceipt = await this.publicClient.waitForTransactionReceipt({ hash: transferHash });
+
+      if (transferReceipt.status !== 'success') {
+        console.error(`${logPrefix} FXRP transfer REVERTED.`);
+        return false;
+      }
+      console.log(`${logPrefix} FXRP transfer confirmed in block ${transferReceipt.blockNumber}.`);
+    } else if (availableAdapterFxrp >= fxrpAmount) {
+      console.log(`${logPrefix} FAssetAdapter already has ${formatUnits(availableAdapterFxrp, decimals)} unallocated FXRP available — using existing balance.`);
+    } else {
+      console.error('');
+      console.error('╔═══════════════════════════════════════════════════════════════════════════╗');
+      console.error('║ ⚠️  INSUFFICIENT FXRP TO PROCESS MINT!                                    ║');
+      console.error('║                                                                           ║');
+      console.error(`║ Executor Wallet : ${this.account.address}`);
+      console.error(`║ Wallet FXRP     : ${formatUnits(executorBalance, decimals)} FXRP`);
+      console.error(`║ Required       : ${formatUnits(fxrpAmount, decimals)} FXRP (for Tag ${destinationTag})`);
+      console.error('║                                                                           ║');
+      console.error('║ 👉 ACTION REQUIRED:                                                       ║');
+      console.error(`║ Request testnet FXRP for address ${this.account.address} from:`);
+      console.error('║ 🔗 https://faucet.flare.network/coston2                                   ║');
+      console.error('╚═══════════════════════════════════════════════════════════════════════════╝');
+      console.error('');
+      return false;
+    }
+
+    // ── 4. Read exact unallocated balance ──────────────────────────
+    //
+    // processDirectMint() requires: observedMintedAmount == (balanceOf - totalPendingFAssets)
+    // We read BOTH values and compute the delta to match exactly.
+
+    const finalAdapterBalance = await this.publicClient.readContract({
+      address: this.fxrp,
+      abi: ERC20_ABI,
+      functionName: 'balanceOf',
+      args: [this.fAssetAdapter],
+    });
+    const finalTotalPending = await this.publicClient.readContract({
+      address: this.fAssetAdapter,
+      abi: FASSET_ADAPTER_ABI,
+      functionName: 'totalPendingFAssets',
+    });
+
+    const observedMintedAmount = finalAdapterBalance - finalTotalPending;
 
     if (observedMintedAmount <= 0n) {
       console.error(
