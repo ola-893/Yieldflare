@@ -1,11 +1,11 @@
-# ⚡ FlareYield: Multi-Vault Yield Aggregator & Rebalance Engine
+# ⚡ Flux: Multi-Vault Yield Aggregator & Rebalance Engine
 
 [![Flare Coston2](https://img.shields.io/badge/Network-Flare%20Coston2%20Testnet-red)](https://coston2-explorer.flare.network/)
 [![Solidity](https://img.shields.io/badge/Solidity-0.8.24-blue)](https://soliditylang.org/)
 [![ERC-4626](https://img.shields.io/badge/Vault-ERC--4626%20Upgradeable-green)](https://eips.ethereum.org/EIPS/eip-4626)
 [![License](https://img.shields.io/badge/License-MIT-purple.svg)](LICENSE)
 
-**FlareYield** is an autonomous, multi-vault yield aggregation platform built for the **Flare Network**. It combines **ERC-4626 yield vaults**, **FAsset direct-minting memos (`0xFE`/`0xFF`)**, **FTSO v2 oracle delegation**, and **Flare Confidential Compute (FCC / TEE) signed rebalancing** into a unified DeFi protocol.
+**Flux** is an autonomous, multi-vault yield aggregation platform built for the **Flare Network**. When users deposit underlying assets (`FXRP` or `CDP`), the protocol mints **Flux Coins** (receipt tokens representing shares in the auto-compounding vault). Flux combines **ERC-4626 yield vaults**, **FAsset direct-minting memos (`0xFE`/`0xFF`)**, **FTSO v2 oracle delegation**, and **Flare Confidential Compute (FCC / TEE) signed rebalancing** into a unified DeFi protocol.
 
 ---
 
@@ -127,6 +127,7 @@ The repository documentation is chronologically organized under the [`docs/`](fi
 * [`01-audit-fixes-applied.md`](file:///Users/ola/Documents/hackathons/flare_yield_manager/docs/04-audit-and-diagnostics/01-audit-fixes-applied.md) — Full audit response & compiler fixes.
 * [`02-enosys-pool-mismatch-analysis.md`](file:///Users/ola/Documents/hackathons/flare_yield_manager/docs/04-audit-and-diagnostics/02-enosys-pool-mismatch-analysis.md) — Enosys V3 pool token mismatch analysis & resolution.
 * [`03-fasset-adapter-fix.md`](file:///Users/ola/Documents/hackathons/flare_yield_manager/docs/04-audit-and-diagnostics/03-fasset-adapter-fix.md) — AssetManager & MintingTagManager resolution.
+* [`04-fce-integration-status.md`](file:///Users/ola/Documents/hackathons/flare_yield_manager/docs/04-audit-and-diagnostics/04-fce-integration-status.md) — Flare Confidential Extension (FCE) status & honest assessment.
 
 ### 5. Guides & Handbooks ([`docs/05-guides/`](file:///Users/ola/Documents/hackathons/flare_yield_manager/docs/05-guides/))
 * [`01-deployment-guide.md`](file:///Users/ola/Documents/hackathons/flare_yield_manager/docs/05-guides/01-deployment-guide.md) — Step-by-step deployment instructions.

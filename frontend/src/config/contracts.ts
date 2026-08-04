@@ -187,8 +187,8 @@ export const isCoston2 = (chainId: number | undefined) => {
  */
 export const CONTRACT_NAMES = {
   // Vaults
-  [CONTRACTS.vaults.fxrpVault]: 'FlareYield FXRP Vault',
-  [CONTRACTS.vaults.cdpVault]: 'FlareYield CDP Vault',
+  [CONTRACTS.vaults.fxrpVault]: 'Flux FXRP Vault (Flux Coin)',
+  [CONTRACTS.vaults.cdpVault]: 'Flux CDP Vault (Flux Coin)',
   
   // Strategies
   [CONTRACTS.strategies.ftsoV2Delegation]: 'FTSO v2 Delegation Strategy',
@@ -196,7 +196,7 @@ export const CONTRACT_NAMES = {
   [CONTRACTS.strategies.enosysCdpLp]: 'Enosys V3 CDP LP Strategy',
   
   // Legacy
-  [CONTRACTS.parentVault]: 'FlareYield Vault (Legacy)',
+  [CONTRACTS.parentVault]: 'Flux Vault (Legacy)',
   [CONTRACTS.fAssetAdapter]: 'FAsset Adapter',
   
   // Tokens
