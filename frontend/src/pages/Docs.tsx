@@ -328,7 +328,7 @@ export const Docs: React.FC = () => {
               {[
                 {step: '01', title: 'Deposit', desc: 'Users send native XRP, BTC, or other supported assets. Flare\'s FAsset system automatically converts these into on-chain representations (FXRP, FBTC) using state proofs verified by the Flare Data Connector.'},
                 {step: '02', title: 'Optimize', desc: 'The ParentVault deploys capital into approved yield strategies (Kinetic lending, Enosys DEX LP) via strategy adapters. A TEE enclave monitors yields across DeFi protocols and signs rebalance payloads when a better opportunity is found.'},
-                {step: '03', title: 'Earn', desc: 'Users hold Flux shares (ERC-4626 tokens) that accrue yield automatically. Share price increases as the underlying strategies earn interest, trading fees, and protocol rewards. Withdrawals are instant when liquidity is available.'},
+                {step: '03', title: 'Earn', desc: 'Users hold Flux tokens (ERC-4626 shares) that accrue yield automatically. Token value increases as the underlying strategies earn interest, trading fees, and protocol rewards. Withdrawals are instant when liquidity is available.'},
               ].map((item, i) => (
                 <div key={i} className="flex gap-4 p-4 rounded-xl bg-white/60 border border-[rgba(23,20,20,0.06)]">
                   <div className="flex-shrink-0 w-10 h-10 rounded-full bg-[#171414] flex items-center justify-center">
@@ -399,7 +399,7 @@ uint256 shares = vault.deposit(assets, msg.sender);
                   'Flare Data Connector observes the payment and generates a state proof',
                   'FAsset system mints FXRP/FBTC directly to the FAssetAdapter',
                   'FAssetAdapter records the post-fee amount and queues a deposit in the ParentVault',
-                  'Anyone calls settleDirectMint() to transfer FAssets and mint ERC-4626 shares to the user',
+                  'Anyone calls settleDirectMint() to transfer FAssets and mint Flux tokens to the user',
                 ].map((step, i) => (
                   <div key={i} className="flex gap-3 items-start">
                     <span className="flex-shrink-0 w-6 h-6 rounded-full bg-[#171414] flex items-center justify-center text-[10px] font-bold text-[#E1BAC2] font-mono">{i + 1}</span>
@@ -416,7 +416,7 @@ uint256 shares = vault.deposit(assets, msg.sender);
             <div id="withdraw-flow" className="mb-10">
               <h3 className="text-lg font-bold text-[#171414] mb-3 font-['Manrope',sans-serif]">Withdrawing Assets</h3>
               <p className="text-sm text-[#4A4A4A] leading-relaxed mb-4 font-['Hanken_Grotesk',sans-serif]">
-                Withdrawals burn your ERC-4626 shares and return the underlying asset. The vault first checks its idle balance; if insufficient, it pulls funds from the active strategy.
+                Withdrawals burn your Flux tokens and return the underlying asset. The vault first checks its idle balance; if insufficient, it pulls funds from the active strategy.
               </p>
               <CodeBlock language="solidity" code={`// Redeem all shares for underlying assets
 uint256 shares = vault.balanceOf(msg.sender);
@@ -442,7 +442,7 @@ vault.withdraw(assetsToWithdraw, msg.sender, msg.sender);`} />
             <div id="parent-vault" className="mb-10">
               <h3 className="text-lg font-bold text-[#171414] mb-3 font-['Manrope',sans-serif]">ParentVault (ERC-4626)</h3>
               <p className="text-sm text-[#4A4A4A] leading-relaxed mb-4 font-['Hanken_Grotesk',sans-serif]">
-                The <code className="px-1.5 py-0.5 rounded bg-[rgba(23,20,20,0.06)] text-[11px] font-mono">ParentVault</code> is the central contract that holds all user assets. It is an <strong>ERC-4626 tokenized vault</strong> — users deposit an underlying asset (e.g., FXRP, USDC.e) and receive proportional shares that accrue yield automatically.
+                The <code className="px-1.5 py-0.5 rounded bg-[rgba(23,20,20,0.06)] text-[11px] font-mono">ParentVault</code> is the central contract that holds all user assets. It is an <strong>ERC-4626 tokenized vault</strong> — users deposit an underlying asset (e.g., FXRP, USDC.e) and receive Flux tokens that accrue yield automatically.
               </p>
 
               <h4 className="text-sm font-bold text-[#171414] mt-6 mb-2 font-['Manrope',sans-serif]">Key Properties</h4>

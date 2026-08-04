@@ -7,7 +7,7 @@ import {ProblemSection} from './components/ProblemSection';
 import {HowItWorksSection} from './components/HowItWorksSection';
 import {VaultSimulator} from './components/VaultSimulator';
 import {SecurityTrustSection} from './components/SecurityTrustSection';
-import {VaultSelectorGrid} from './components/VaultSelectorGrid';
+
 import {Footer} from './components/Footer';
 import {useConnectModal} from '@rainbow-me/rainbowkit';
 
@@ -56,7 +56,6 @@ function LandingPage() {
         <HowItWorksSection onConnectWallet={openConnectModal} />
         <VaultSimulator onConnectWallet={openConnectModal} />
         <SecurityTrustSection />
-        <VaultSelectorGrid onConnectWallet={openConnectModal} />
       </main>
 
       <Footer />

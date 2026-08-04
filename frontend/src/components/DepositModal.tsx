@@ -135,7 +135,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
               </div>
               <div className="flex items-center justify-between text-[#4A4A4A]">
                 <span>Vault Share Token:</span>
-                <span className="font-bold text-[#1E1E1E]">ERC-4626 Shares</span>
+                <span className="font-bold text-[#1E1E1E]">Flux Token</span>
               </div>
             </div>
 
@@ -169,7 +169,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
 
             <h4 className="text-2xl font-extrabold text-[#1E1E1E] mb-1" style={{ fontFamily: 'Manrope, sans-serif' }}>Deposit Confirmed!</h4>
             <p className="text-xs text-emerald-700 font-mono font-bold mb-6">
-              Your ERC-4626 vault shares are now accruing yield on Flare Coston2 testnet.
+              Your Flux tokens are now accruing yield on Flare Coston2 testnet.
             </p>
 
             <div className="p-4 rounded-2xl bg-white/70 border border-[#1E1E1E]/15 mb-6 text-xs text-left space-y-2">
@@ -179,7 +179,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
               </div>
               <div className="flex justify-between">
                 <span className="text-[#4A4A4A]">Vault Shares:</span>
-                <span className="font-bold text-[#E1BAC2]">{amount} ERC-4626 Shares</span>
+                <span className="font-bold text-[#E1BAC2]">{amount} Flux</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-[#4A4A4A]">Network:</span>

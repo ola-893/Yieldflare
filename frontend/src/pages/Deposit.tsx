@@ -105,6 +105,8 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   });
   // Fall back to 0 if the read fails (e.g. contract doesn't expose the function)
   const reservationFee: bigint = (reservationFeeRaw as bigint | undefined) ?? 0n;
+  // Debug: log the fee value
+  console.log('[Deposit] reservationFeeRaw:', reservationFeeRaw, 'reservationFee:', reservationFee.toString());
 
   // Check user's native C2FLR balance
   const {data: balanceData} = useBalance({address});
@@ -296,7 +298,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
             Deposit Native Assets
           </h1>
           <p className="text-sm text-[#4A4A4A] mt-2">
-            Send native XRP or BTC → FAssets are minted → ParentVault shares are issued
+            Send native XRP or BTC → FAssets are minted → Flux tokens are issued
           </p>
         </motion.div>
 
@@ -682,7 +684,7 @@ const StepReadyToSettle: React.FC<{
           FAssets received!
         </h3>
         <p className="text-xs text-[#4A4A4A]">
-          Your deposit has been processed. Click below to settle and receive your ERC-4626 vault shares.
+          Your deposit has been processed. Click below to settle and receive your Flux tokens.
         </p>
       </div>
 
@@ -749,7 +751,7 @@ const StepSettling: React.FC = () => (
       Settling your deposit
     </h3>
     <p className="text-xs text-[#4A4A4A]">
-      Transferring FAssets to the ParentVault and minting your ERC-4626 shares...
+      Transferring FAssets to the ParentVault and minting your Flux tokens...
     </p>
   </motion.div>
 );
@@ -775,7 +777,7 @@ const StepComplete: React.FC<{
         Deposit Complete!
       </h3>
       <p className="text-xs text-emerald-700 font-mono font-bold">
-        Your ERC-4626 vault shares are now accruing yield on Flare Coston2 testnet.
+        Your Flux tokens are now accruing yield on Flare Coston2 testnet.
       </p>
     </div>
 

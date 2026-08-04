@@ -67,7 +67,7 @@ export const SecurityTrustSection: React.FC = () => {
               <div>
                 <h3 className="text-base font-bold text-[#1E1E1E] mb-1" style={{ fontFamily: 'Manrope, sans-serif' }}>You hold the keys</h3>
                 <p className="text-xs text-[#4A4A4A] leading-relaxed">
-                  Your deposits are tracked as vault share tokens in your wallet. Only you can withdraw your funds by burning those shares — no one else can touch them.
+                  Your deposits are tracked as Flux tokens in your wallet. Only you can withdraw your funds by burning those tokens — no one else can touch them.
                 </p>
               </div>
             </motion.div>

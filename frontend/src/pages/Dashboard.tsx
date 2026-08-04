@@ -2,9 +2,10 @@ import React, {useState} from 'react';
 import {useAccount, useBalance, useReadContract} from 'wagmi';
 import {formatUnits} from 'viem';
 import {motion} from 'motion/react';
-import {TrendingUp, Layers, Clock, ArrowUpRight, ArrowDownRight, Wallet, RefreshCw, Zap, ShieldCheck, Copy, Check} from 'lucide-react';
+import {TrendingUp, Layers, Clock, ArrowUpRight, ArrowDownRight, Wallet, RefreshCw, Zap, ShieldCheck, Copy, Check, ChevronRight} from 'lucide-react';
 import xrpImg from '../assets/images/xrp.webp';
 import {CONTRACTS, PARENT_VAULT_ABI} from '../config/contracts';
+import {StrategiesModal} from '../components/StrategiesModal';
 
 const PARENT_VAULT_ADDRESS: `0x${string}` = CONTRACTS.parentVault;
 
@@ -17,6 +18,7 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
   const {address, isConnected} = useAccount();
   const {data: nativeBalance} = useBalance({address});
   const [copied, setCopied] = useState(false);
+  const [showStrategiesModal, setShowStrategiesModal] = useState(false);
 
   // Check if contract address is deployed (not zero address)
   const isDeployed = PARENT_VAULT_ADDRESS !== '0x0000000000000000000000000000000000000000';
@@ -67,11 +69,45 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
   const userShareBalance = userShares ? Number(formatUnits(userShares, decimals)) : 0;
   const userValueUsd = userShareBalance * sharePrice;
 
+  // Check if strategy is active
+  const hasActiveStrategy = activeStrategy && activeStrategy !== '0x0000000000000000000000000000000000000000';
+
   // Strategy name mapping
-  const getStrategyName = (addr: string | undefined) => {
-    if (!addr || addr === '0x0000000000000000000000000000000000000000') return 'No Active Strategy';
-    return 'Kinetic Lending';
+  const getStrategyInfo = (addr: string | undefined) => {
+    if (!addr || addr === '0x0000000000000000000000000000000000000000') {
+      return {name: 'No Active Strategy', status: 'idle', description: 'Deposit FXRP to activate yield generation'};
+    }
+    // Map known strategy addresses to names
+    const strategies: Record<string, {name: string; status: string; description: string; apy: string}> = {
+      [CONTRACTS.strategies.ftsoV2Delegation]: {
+        name: 'FTSO v2 Delegation',
+        status: 'active',
+        description: 'Earning rewards by supporting Flare oracle network',
+        apy: '3-8%'
+      },
+      [CONTRACTS.strategies.sparkDexLp]: {
+        name: 'SparkDEX LP',
+        status: 'active',
+        description: 'Earning trading fees from DEX liquidity',
+        apy: '5-15%'
+      },
+      [CONTRACTS.strategies.smartAccountDirectMint]: {
+        name: 'Smart Account Direct Mint',
+        status: 'active',
+        description: 'Optimized FAsset minting path',
+        apy: '2-5%'
+      },
+      [CONTRACTS.strategies.enosysFxrp]: {
+        name: 'Enosys DEX FXRP',
+        status: 'active',
+        description: 'Earning fees from cross-chain liquidity',
+        apy: '8-14%'
+      },
+    };
+    return strategies[addr] || {name: 'Unknown Strategy', status: 'active', description: 'Yield generation active', apy: 'N/A'};
   };
+
+  const strategyInfo = getStrategyInfo(activeStrategy);
 
   const copyAddress = () => {
     if (address) {
@@ -162,18 +198,18 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
         {/* ─── Stats Grid ─── */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5 mb-10">
           <StatCard
-            label="Your Vault Shares"
+            label="Your Flux Tokens"
             value={userShareBalance > 0 ? `${userShareBalance.toFixed(4)}` : '0'}
-            suffix="shares"
-            subtext={userShareBalance > 0 ? `≈ $${userValueUsd.toFixed(2)}` : 'No deposits yet'}
+            suffix="Flux"
+            subtext={userShareBalance > 0 ? `≈ ${userValueUsd.toFixed(6)} FXRP` : 'No deposits yet'}
             icon={<Layers className="w-5 h-5" />}
             delay={0.1}
           />
           <StatCard
             label="Share Price"
-            value={`$${sharePrice.toFixed(6)}`}
+            value={`${sharePrice.toFixed(6)}`}
             suffix=""
-            subtext="Per ERC-4626 share"
+            subtext="FXRP per Flux"
             icon={<TrendingUp className="w-5 h-5" />}
             delay={0.2}
           />
@@ -181,7 +217,7 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
             label="Total Vault Assets"
             value={totalAssets ? `${formatUnits(totalAssets, decimals).slice(0, 10)}` : '0'}
             suffix=""
-            subtext="Underlying asset value"
+            subtext="Underlying FXRP"
             icon={<RefreshCw className="w-5 h-5" />}
             delay={0.3}
           />
@@ -212,12 +248,16 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
                   <ShieldCheck className="w-4 h-4" />
                 </div>
                 <h3 className="text-base font-bold text-[#1E1E1E]" style={{fontFamily: 'Manrope, sans-serif'}}>
-                  Active Strategy
+                  Yield Strategy
                 </h3>
               </div>
-              <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 text-emerald-600 text-[10px] font-mono font-bold border border-emerald-500/20">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-                Live
+              <div className={`flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-mono font-bold border ${
+                hasActiveStrategy 
+                  ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20' 
+                  : 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${hasActiveStrategy ? 'bg-emerald-500' : 'bg-amber-500'} animate-pulse`} />
+                {hasActiveStrategy ? 'Active' : 'Idle'}
               </div>
             </div>
 
@@ -228,36 +268,40 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
               </div>
               <div className="flex-1">
                 <h4 className="text-xl font-extrabold text-[#1E1E1E]" style={{fontFamily: 'Manrope, sans-serif'}}>
-                  {getStrategyName(activeStrategy)}
+                  {strategyInfo.name}
                 </h4>
-                <p className="text-xs text-[#4A4A4A] font-mono mt-1">
-                  {activeStrategy && activeStrategy !== '0x0000000000000000000000000000000000000000'
-                    ? `${activeStrategy.slice(0, 6)}...${activeStrategy.slice(-4)}`
-                    : 'No strategy deployed yet'}
+                <p className="text-xs text-[#4A4A4A] mt-1">
+                  {strategyInfo.description}
                 </p>
+                {hasActiveStrategy && (
+                  <p className="text-[10px] font-mono text-[#4A4A4A] mt-2">
+                    {activeStrategy?.slice(0, 6)}...{activeStrategy?.slice(-4)}
+                  </p>
+                )}
               </div>
             </div>
 
-            {/* Protocol & Asset */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="p-4 rounded-2xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
-                <p className="text-[10px] font-mono font-bold text-[#4A4A4A] uppercase tracking-wider mb-1">Protocol</p>
-                <p className="text-sm font-bold text-[#1E1E1E]" style={{fontFamily: 'Manrope, sans-serif'}}>Kinetic Market</p>
+            {/* APY Display */}
+            {hasActiveStrategy && (
+              <div className="mb-6 p-4 rounded-2xl bg-gradient-to-r from-emerald-50 to-emerald-100/50 border border-emerald-200">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs font-bold text-emerald-700">Projected APY</span>
+                  <span className="text-2xl font-extrabold text-emerald-800" style={{fontFamily: 'Manrope, sans-serif'}}>
+                    {strategyInfo.apy}
+                  </span>
+                </div>
               </div>
-              <div className="p-4 rounded-2xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
-                <p className="text-[10px] font-mono font-bold text-[#4A4A4A] uppercase tracking-wider mb-1">Asset</p>
-                <p className="text-sm font-bold text-[#1E1E1E]" style={{fontFamily: 'Manrope, sans-serif'}}>USDC.e</p>
-              </div>
-            </div>
+            )}
 
-            {/* Strategy Details */}
-            <div className="mt-5 p-4 rounded-2xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
-              <p className="text-[10px] font-mono font-bold text-[#4A4A4A] uppercase tracking-wider mb-3">Security</p>
-              <div className="flex items-start gap-2 text-xs text-[#1E1E1E]">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#E1BAC2] mt-1.5 shrink-0" />
-                <span>Every rebalance is cryptographically signed by the FCC TEE enclave</span>
-              </div>
-            </div>
+            {/* View All Strategies Button */}
+            <button
+              onClick={() => setShowStrategiesModal(true)}
+              className="w-full py-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10 text-[#1E1E1E] text-[11px] font-bold uppercase tracking-[0.12em] hover:bg-[#1E1E1E] hover:text-[#E1BAC2] transition-all flex items-center justify-center gap-2"
+            >
+              <Zap className="w-4 h-4" />
+              Choose a Yield Strategy
+              <ChevronRight className="w-4 h-4" />
+            </button>
           </motion.div>
 
           {/* Quick Actions */}
@@ -283,7 +327,7 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
                 style={{fontFamily: 'Manrope, sans-serif'}}
               >
                 <ArrowDownRight className="w-4 h-4 group-hover:translate-y-0.5 transition-transform" />
-                <span>Deposit</span>
+                <span>Deposit FXRP</span>
               </button>
 
               <button
@@ -293,7 +337,7 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
                 style={{fontFamily: 'Manrope, sans-serif'}}
               >
                 <ArrowUpRight className="w-4 h-4 group-hover:-translate-y-0.5 transition-transform" />
-                <span>Withdraw</span>
+                <span>Withdraw Flux</span>
               </button>
             </div>
 
@@ -310,7 +354,7 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
                 <p className="text-[10px] font-mono font-bold text-[#4A4A4A] uppercase tracking-wider">Settlement</p>
               </div>
               <p className="text-xs text-[#4A4A4A] leading-relaxed" style={{fontFamily: 'Hanken Grotesk, sans-serif'}}>
-                FAsset deposits are asynchronous. After sending native XRP/BTC, settlement may take minutes to hours depending on FAsset attestation.
+                FAsset deposits are asynchronous. After sending native XRP, settlement may take minutes to hours depending on FAsset attestation.
               </p>
             </div>
           </motion.div>
@@ -345,6 +389,13 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
         </motion.div>
 
       </div>
+
+      {/* ─── Strategies Modal ─── */}
+      <StrategiesModal
+        isOpen={showStrategiesModal}
+        onClose={() => setShowStrategiesModal(false)}
+        activeStrategy={activeStrategy as string}
+      />
     </div>
   );
 };

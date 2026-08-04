@@ -45,10 +45,10 @@ export const ARCHITECTURE_COMPONENTS: ArchitectureComponent[] = [
   },
   {
     id: 'flare-yield-shares',
-    title: 'FlareYield Share Token',
+    title: 'Flux Token',
     subtitle: 'Non-Custodial ERC-20 Ownership',
     realSystemName: 'Central Locked Vault Door',
-    description: 'ERC-4626 vault shares representing proportional ownership of the ParentVault assets, with yield accruing through strategy-level exchange rates.',
+    description: 'ERC-4626 Flux tokens representing proportional ownership of the ParentVault assets, with yield accruing through strategy-level exchange rates.',
     xRatio: 0.62, yRatio: 0.68, minScroll: 0.65, maxScroll: 0.88,
     tag: 'ERC-20 Standard',
     technicalDetails: ['ERC-4626 Vault Standard', 'Configurable Liquidity Buffer', 'exchangeRateStored Pricing']

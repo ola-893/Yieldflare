@@ -29,6 +29,8 @@ export const CONTRACTS = {
     // FXRP Vault Strategies
     ftsoV2Delegation: import.meta.env.VITE_FTSO_ADAPTER_ADDRESS || '0xa0811A54F72Fd3e7b0F30d75227741feFE2755fB',
     sparkDexLp: import.meta.env.VITE_SPARKDEX_ADAPTER_ADDRESS || '0xA88327A42267C0dE171CBECA1b016dEF2e990612',
+    smartAccountDirectMint: import.meta.env.VITE_SMART_ACCOUNT_ADAPTER_ADDRESS || '0xE0395E7B9Ac8B39463b85a8B20D93c2429F7D4Aa',
+    enosysFxrp: import.meta.env.VITE_ENOSYS_FXRP_ADAPTER_ADDRESS || '0x5A839334A11983b958a7C70a8822783db6Be4bf6',
     
     // CDP Vault Strategies
     enosysCdpLp: import.meta.env.VITE_ENOSYS_CDP_ADAPTER_ADDRESS || '0x276BBc877C3d50e50848E7ca8c68241D959F4800',
@@ -214,22 +216,38 @@ export const VAULT_METADATA = {
   fxrp: {
     address: CONTRACTS.vaults.fxrpVault,
     name: 'FXRP Vault',
-    symbol: 'fyFXRP',
+    symbol: 'Flux',
     description: 'Growth-oriented vault for XRP holders. Earn yield without selling your XRP.',
     underlyingAsset: CONTRACTS.tokens.fxrp,
     underlyingSymbol: 'FXRP',
     strategies: [
       {
         address: CONTRACTS.strategies.ftsoV2Delegation,
-        name: 'FTSO Delegation',
+        name: 'FTSO v2 Delegation',
         apyRange: '3-8%',
         riskLevel: 'Low',
+        status: 'Deployed',
       },
       {
         address: CONTRACTS.strategies.sparkDexLp,
         name: 'SparkDEX LP',
         apyRange: '5-15%',
         riskLevel: 'Medium',
+        status: 'Deployed',
+      },
+      {
+        address: CONTRACTS.strategies.smartAccountDirectMint,
+        name: 'Smart Account Direct Mint',
+        apyRange: '2-5%',
+        riskLevel: 'Low',
+        status: 'Deployed',
+      },
+      {
+        address: CONTRACTS.strategies.enosysFxrp,
+        name: 'Enosys DEX FXRP',
+        apyRange: '8-14%',
+        riskLevel: 'Medium',
+        status: 'Deployed',
       },
     ],
     riskProfile: 'Medium' as const,

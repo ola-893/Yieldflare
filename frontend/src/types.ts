@@ -6,11 +6,12 @@ export interface VaultInfo {
   id: string;
   name: string;
   assetSymbol: 'FXRP' | 'USDC.e';
-  strategyType: 'Kinetic Lending' | 'Enosys DEX LP';
+  strategyType: 'Kinetic Lending' | 'Enosys DEX LP' | 'FTSO Delegation' | 'SparkDEX LP' | 'Direct Mint' | 'Enosys DEX FXRP';
   projectedApy: string;
-  status: 'Testnet' | 'Mainnet';
+  status: 'Testnet' | 'Mainnet' | 'Deployed' | 'Coming Soon';
   primaryProtocol: string;
   primaryProtocolUrl: string;
+  contractAddress?: string;
   description: string;
   details: string[];
 }
