@@ -127,6 +127,7 @@ The repository documentation is chronologically organized under the [`docs/`](fi
 * [`01-audit-fixes-applied.md`](file:///Users/ola/Documents/hackathons/flare_yield_manager/docs/04-audit-and-diagnostics/01-audit-fixes-applied.md) — Full audit response & compiler fixes.
 * [`02-enosys-pool-mismatch-analysis.md`](file:///Users/ola/Documents/hackathons/flare_yield_manager/docs/04-audit-and-diagnostics/02-enosys-pool-mismatch-analysis.md) — Enosys V3 pool token mismatch analysis & resolution.
 * [`03-fasset-adapter-fix.md`](file:///Users/ola/Documents/hackathons/flare_yield_manager/docs/04-audit-and-diagnostics/03-fasset-adapter-fix.md) — AssetManager & MintingTagManager resolution.
+* [`04-fce-integration-status.md`](file:///Users/ola/Documents/hackathons/flare_yield_manager/docs/04-audit-and-diagnostics/04-fce-integration-status.md) — Flare Confidential Extension (FCE) status & honest assessment.
 
 ### 5. Guides & Handbooks ([`docs/05-guides/`](file:///Users/ola/Documents/hackathons/flare_yield_manager/docs/05-guides/))
 * [`01-deployment-guide.md`](file:///Users/ola/Documents/hackathons/flare_yield_manager/docs/05-guides/01-deployment-guide.md) — Step-by-step deployment instructions.
