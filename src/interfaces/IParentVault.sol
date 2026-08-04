@@ -3,7 +3,7 @@ pragma solidity ^0.8.24;
 
 /**
  * @title IParentVault
- * @notice Central vault that handles user deposits, mints FlareYield shares, and delegates funds to StrategyAdapters.
+ * @notice Central vault that handles user deposits, mints Flux Coins (vault shares), and delegates funds to StrategyAdapters.
  */
 interface IParentVault {
     struct RebalancePayload {

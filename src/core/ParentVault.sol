@@ -16,10 +16,8 @@ import {IStrategyAdapter} from "../interfaces/IStrategyAdapter.sol";
 
 /**
  * @title ParentVault
- * @notice ERC-4626 FlareYield vault whose assets can be deployed through approved strategy adapters.
- * @dev The normal OpenZeppelin `ReentrancyGuard` is deliberately used here. In OZ v5.6 it has a
- *      namespaced storage slot and remains proxy-safe; its zero-value proxy state is safely initialized on
- *      first use. OZ no longer ships a separate `ReentrancyGuardUpgradeable` in this release.
+ * @notice ERC-4626 Flux vault whose assets can be deployed through approved strategy adapters.
+ * @dev Combines ERC-4626 vault shares (Flux Coins), FAsset direct-minting routing, and EIP-712 TEE rebalance execution.
  */
 contract ParentVault is
     ERC4626Upgradeable,
@@ -41,7 +39,7 @@ contract ParentVault is
     );
     bytes32 private constant DOMAIN_TYPEHASH =
         keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
-    bytes32 private constant NAME_HASH = keccak256("FlareYield ParentVault");
+    bytes32 private constant NAME_HASH = keccak256("Flux ParentVault");
     bytes32 private constant VERSION_HASH = keccak256("1");
 
     error ZeroAddress();

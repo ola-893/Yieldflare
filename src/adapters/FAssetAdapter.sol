@@ -15,7 +15,7 @@ import {IERC721Receiver} from "@openzeppelin/contracts/token/ERC721/IERC721Recei
 
 /**
  * @title FAssetAdapter
- * @notice Routes tag-based FAsset direct mints into the FlareYield ParentVault.
+ * @notice Routes tag-based FAsset direct mints into the Flux ParentVault.
  * @dev The configured direct-mint executor must call {processDirectMint} immediately after completing
  *      the Flare AssetManager operation. The adapter verifies the FAsset balance delta before queuing
  *      it, so the amount that reaches ERC-4626 is the real post-fee amount rather than a quoted amount.
