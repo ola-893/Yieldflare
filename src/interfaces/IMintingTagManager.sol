@@ -2,14 +2,35 @@
 pragma solidity ^0.8.24;
 
 /**
- * @notice Minimal, ABI-compatible subset of Flare's IMintingTagManager used by FAssetAdapter.
- * @dev The full official interface additionally exposes ERC-721 enumeration and tag-transfer helpers.
+ * @notice Minimal interface for Flare's MintingTagManager
  */
 interface IMintingTagManager {
-    function reserve() external payable returns (uint256);
-    function setMintingRecipient(uint256 mintingTag, address recipient) external;
-    function setAllowedExecutor(uint256 mintingTag, address executor) external;
+    /**
+     * @notice Reserve a new minting tag (pay reservation fee)
+     * @return tag The reserved tag ID
+     */
+    function reserve() external payable returns (uint256 tag);
+
+    /**
+     * @notice Set the minting recipient for a tag
+     * @param tag Tag identifier
+     * @param recipient Address to receive minted FAssets
+     */
+    function setMintingRecipient(uint256 tag, address recipient) external;
+
+    /**
+     * @notice Set the allowed executor for a tag
+     * @param tag Tag identifier
+     * @param executor Address authorized to execute minting
+     */
+    function setAllowedExecutor(uint256 tag, address executor) external;
+
+    /**
+     * @notice Get the reservation fee amount
+     * @return Fee in native currency
+     */
     function reservationFee() external view returns (uint256);
+    
     function mintingRecipient(uint256 mintingTag) external view returns (address);
     function allowedExecutor(uint256 mintingTag) external view returns (address);
 }
