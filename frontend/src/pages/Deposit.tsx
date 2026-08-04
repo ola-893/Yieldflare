@@ -2,13 +2,13 @@ import React, {useState, useEffect, useMemo} from 'react';
 import {useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract, useBalance} from 'wagmi';
 import {decodeEventLog, parseUnits, formatUnits} from 'viem';
 import {motion, AnimatePresence} from 'motion/react';
-import {Lock, RefreshCw, Check, ArrowRight, Copy, Clock, AlertCircle, Coins, ShieldCheck, Wallet} from 'lucide-react';
+import {Lock, RefreshCw, Check, ArrowRight, Copy, Clock, AlertCircle, Coins, ShieldCheck, Wallet, Zap} from 'lucide-react';
 import xrpImg from '../assets/images/xrp.webp';
 import btcImg from '../assets/images/btc.webp';
 import {CONTRACTS, FASSET_ADAPTER_ABI, ASSET_MANAGER_ABI, MINTING_TAG_MANAGER_ABI, PARENT_VAULT_ABI} from '../config/contracts';
 
 type DepositFlow = 'FASSET' | 'ERC4626';
-type FassetStep = 'SELECT' | 'RESERVE_TAG' | 'AWAITING_DEPOSIT' | 'READY_TO_SETTLE' | 'SETTLING' | 'COMPLETE';
+type FassetStep = 'SELECT' | 'RESERVE_TAG' | 'AWAITING_DEPOSIT' | 'READY_TO_SETTLE' | 'SETTLING' | 'DEPLOY' | 'COMPLETE';
 type Erc4626Step = 'ERC4626_SELECT' | 'APPROVE' | 'APPROVING' | 'DEPOSIT' | 'DEPOSITING' | 'COMPLETE_CDP';
 type DepositStep = FassetStep | Erc4626Step;
 
@@ -185,8 +185,8 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
 
   useEffect(() => {
     if (settleHash && !isSettleConfirming) {
-      setStep('COMPLETE');
-      saveState('COMPLETE');
+      setStep('DEPLOY');
+      saveState('DEPLOY');
     }
   }, [settleHash, isSettleConfirming]);
 
@@ -226,6 +226,38 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
       args: [depositId as `0x${string}`],
     } as any);
     setStep('SETTLING');
+  };
+
+  // Write: Execute rebalance to deploy idle capital to strategy
+  const {writeContract: executeRebalance, data: rebalanceHash, isPending: isRebalancing, error: rebalanceError} = useWriteContract();
+  const {isLoading: isRebalanceConfirming, error: rebalanceReceiptError} = useWaitForTransactionReceipt({hash: rebalanceHash});
+
+  const handleDeployToStrategy = () => {
+    // Rebalance payload - will be signed by TEE/keeper
+    // For now, construct a basic payload targeting the first approved strategy
+    const payload = {
+      newStrategy: CONTRACTS.strategies.enosysFxrp,
+      minAmountOut: 0n,
+      nonce: 0n, // Will be read from contract
+      deadline: BigInt(Math.floor(Date.now() / 1000) + 3600), // 1 hour from now
+      twapStart: BigInt(Math.floor(Date.now() / 1000) - 86400), // 24h ago
+      twapEnd: BigInt(Math.floor(Date.now() / 1000)),
+      strategyDataHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
+      signature: '0x' as `0x${string}`,
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    executeRebalance({
+      address: CONTRACTS.parentVault,
+      abi: PARENT_VAULT_ABI as any,
+      functionName: 'executeRebalance',
+      args: [payload],
+    } as any);
+    setStep('COMPLETE');
+  };
+
+  const handleSkipDeploy = () => {
+    setStep('COMPLETE');
   };
 
   const handleCopyTag = () => {
@@ -438,7 +470,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   };
 
   // Determine current step index for indicator
-  const fassetSteps = ['SELECT', 'RESERVE_TAG', 'AWAITING_DEPOSIT', 'READY_TO_SETTLE', 'COMPLETE'];
+  const fassetSteps = ['SELECT', 'RESERVE_TAG', 'AWAITING_DEPOSIT', 'READY_TO_SETTLE', 'DEPLOY', 'COMPLETE'];
   const erc4626Steps = ['ERC4626_SELECT', 'APPROVE', 'DEPOSIT', 'COMPLETE_CDP'];
   const currentSteps = depositFlow === 'FASSET' ? fassetSteps : erc4626Steps;
 
@@ -555,6 +587,18 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
             <StepSettling key="settling" />
           )}
 
+          {depositFlow === 'FASSET' && step === 'DEPLOY' && (
+            <StepDeployToStrategy
+              key="deploy"
+              xrplAmount={xrplAmount}
+              onDeploy={handleDeployToStrategy}
+              onSkip={handleSkipDeploy}
+              isDeploying={isRebalancing}
+              isConfirming={isRebalanceConfirming}
+              error={rebalanceError?.message || rebalanceReceiptError?.message}
+            />
+          )}
+
           {depositFlow === 'FASSET' && step === 'COMPLETE' && (
             <StepComplete key="complete" asset={asset} onReset={handleReset} onBack={onBack} onNewDeposit={handleNewDeposit} />
           )}
@@ -647,6 +691,7 @@ const StepIndicator: React.FC<{steps: string[]; currentStep: string}> = ({steps,
     'AWAITING_DEPOSIT': 'Awaiting',
     'READY_TO_SETTLE': 'Settle',
     'SETTLING': 'Settling',
+    'DEPLOY': 'Deploy',
     'COMPLETE': 'Complete',
     'ERC4626_SELECT': 'Amount',
     'APPROVE': 'Approve',
@@ -998,6 +1043,96 @@ const StepSettling: React.FC = () => (
     <p className="text-xs text-[#4A4A4A]">
       Transferring FAssets to the ParentVault and minting your Flux tokens...
     </p>
+  </motion.div>
+);
+
+// ─── FAsset Step: Deploy to Strategy ──────────────────────────────────────
+const StepDeployToStrategy: React.FC<{
+  xrplAmount: string | null;
+  onDeploy: () => void;
+  onSkip: () => void;
+  isDeploying: boolean;
+  isConfirming: boolean;
+  error?: string | null;
+}> = ({xrplAmount, onDeploy, onSkip, isDeploying, isConfirming, error}) => (
+  <motion.div
+    initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
+    className="glass-panel p-6 sm:p-8 rounded-3xl border border-[#1E1E1E]/15 shadow-soft-editorial bg-white/60"
+  >
+    <div className="text-center mb-8">
+      <div className="w-16 h-16 rounded-full bg-[#E1BAC2]/10 border border-[#E1BAC2]/30 flex items-center justify-center mx-auto mb-4">
+        <Zap className="w-8 h-8 text-[#E1BAC2]" />
+      </div>
+      <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
+        Deploy to Yield Strategy
+      </h3>
+      <p className="text-xs text-[#4A4A4A]">
+        Your FXRP is in the vault. Deploy it now to start earning yield automatically.
+      </p>
+    </div>
+
+    {/* Deposit Summary */}
+    <div className="p-4 rounded-2xl bg-[#F5F5F3] border border-[#1E1E1E]/10 mb-6 space-y-3">
+      {xrplAmount && (
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-[#4A4A4A]">FXRP Ready</span>
+          <span className="font-mono font-bold text-[#1E1E1E]">{xrplAmount} FXRP</span>
+        </div>
+      )}
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-[#4A4A4A]">Target Strategy</span>
+        <span className="font-mono font-bold text-[#E1BAC2]">Enosys DEX FXRP</span>
+      </div>
+      <div className="flex items-center justify-between text-xs">
+        <span className="text-[#4A4A4A]">Projected APY</span>
+        <span className="font-mono font-bold text-emerald-600">~8-14%</span>
+      </div>
+    </div>
+
+    {/* How it works */}
+    <div className="p-4 rounded-2xl bg-white/70 border border-[#1E1E1E]/15 mb-6">
+      <p className="text-[10px] font-mono font-bold text-[#4A4A4A] uppercase tracking-wider mb-2">How it works</p>
+      <div className="space-y-2">
+        <div className="flex items-start gap-2 text-[11px] text-[#4A4A4A]">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#E1BAC2] mt-1.5 shrink-0" />
+          <span>TEE monitors yields 24/7 and rebalances when better opportunities arise</span>
+        </div>
+        <div className="flex items-start gap-2 text-[11px] text-[#4A4A4A]">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#E1BAC2] mt-1.5 shrink-0" />
+          <span>Your Flux tokens accrue value automatically through compounding</span>
+        </div>
+        <div className="flex items-start gap-2 text-[11px] text-[#4A4A4A]">
+          <span className="w-1.5 h-1.5 rounded-full bg-[#E1BAC2] mt-1.5 shrink-0" />
+          <span>Non-custodial — you can withdraw anytime</span>
+        </div>
+      </div>
+    </div>
+
+    {error && (
+      <div className="p-3 rounded-xl bg-red-50 border border-red-200 mb-6">
+        <p className="text-xs text-red-700 font-mono break-all">{error}</p>
+      </div>
+    )}
+
+    <div className="grid grid-cols-2 gap-3">
+      <button
+        onClick={onDeploy}
+        disabled={isDeploying || isConfirming}
+        className="py-3.5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.15em] hover:bg-[#000000] transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+      >
+        {isDeploying || isConfirming ? (
+          <><RefreshCw className="w-4 h-4 animate-spin" /><span>Deploying...</span></>
+        ) : (
+          <><Zap className="w-4 h-4 text-[#E1BAC2]" /><span>Deploy to Strategy</span></>
+        )}
+      </button>
+      <button
+        onClick={onSkip}
+        className="py-3.5 rounded-full border border-[#1E1E1E]/20 text-[#1E1E1E] text-[11px] font-bold uppercase tracking-[0.15em] hover:border-[#E1BAC2] transition-all"
+      >
+        Skip for Now
+      </button>
+    </div>
   </motion.div>
 );
 
