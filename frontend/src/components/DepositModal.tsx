@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { VaultInfo } from '../types';
 import confetti from 'canvas-confetti';
-import { Check, Sparkles, Lock, RefreshCw, X } from 'lucide-react';
+import { Check, Sparkles, Lock, RefreshCw, X, Coins } from 'lucide-react';
 import xrpImg from '../assets/images/xrp.webp';
 import btcImg from '../assets/images/btc.webp';
 
@@ -16,7 +16,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
   onClose,
   selectedVault
 }) => {
-  const [asset, setAsset] = useState<'XRP' | 'BTC'>(selectedVault?.assetSymbol === 'FXRP' ? 'BTC' : 'XRP');
+  const [asset, setAsset] = useState<'XRP' | 'BTC' | 'CDP'>(selectedVault?.assetSymbol === 'CDP' ? 'CDP' : selectedVault?.assetSymbol === 'FXRP' ? 'BTC' : 'XRP');
   const [amount, setAmount] = useState<string>(asset === 'XRP' ? '2500' : '0.25');
   const [step, setStep] = useState<'INPUT' | 'MINTING' | 'CONFIRMED'>('INPUT');
 
@@ -61,14 +61,16 @@ export const DepositModal: React.FC<DepositModalProps> = ({
             </div>
 
             <h3 className="text-2xl font-extrabold text-[#1E1E1E] mb-1" style={{ fontFamily: 'Manrope, sans-serif' }}>
-              Deposit into <span className="text-[#E1BAC2]">{asset === 'XRP' ? 'Kinetic' : 'Enosys'}</span>
+              Deposit into <span className="text-[#E1BAC2]">{asset === 'CDP' ? 'CDP Vault' : asset === 'XRP' ? 'Kinetic' : 'Enosys'}</span>
             </h3>
             <p className="text-xs text-[#4A4A4A] mb-6">
-              Deposit {asset === 'XRP' ? 'FXRP' : 'USDC.e'} into the ParentVault via a queue-settle flow. Yields accrue through strategy-level exchange rates.
+              {asset === 'CDP'
+                ? 'Deposit CDP stablecoin into the vault via ERC-4626. Yields accrue from Enosys V3 CDP/WC2FLR LP.'
+                : `Deposit ${asset === 'XRP' ? 'FXRP' : 'USDC.e'} into the ParentVault via a queue-settle flow. Yields accrue through strategy-level exchange rates.`}
             </p>
 
             {/* Asset Toggle */}
-            <div className="grid grid-cols-2 gap-2 p-1.5 rounded-2xl border border-[#1E1E1E]/15 bg-white/40 mb-6">
+            <div className="grid grid-cols-3 gap-2 p-1.5 rounded-2xl border border-[#1E1E1E]/15 bg-white/40 mb-6">
               <button
                 onClick={() => {
                   setAsset('XRP');
@@ -81,7 +83,7 @@ export const DepositModal: React.FC<DepositModalProps> = ({
                 }`}
               >
                 <img src={btcImg} alt="" className="w-4 h-4 object-contain" />
-                Kinetic (USDC.e)
+                Kinetic
               </button>
               <button
                 onClick={() => {
@@ -95,7 +97,21 @@ export const DepositModal: React.FC<DepositModalProps> = ({
                 }`}
               >
                 <img src={xrpImg} alt="" className="w-4 h-4 object-contain" />
-                Enosys (FXRP)
+                Enosys
+              </button>
+              <button
+                onClick={() => {
+                  setAsset('CDP');
+                  setAmount('1000');
+                }}
+                className={`py-2 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+                  asset === 'CDP'
+                    ? 'bg-[#1E1E1E] text-[#E1BAC2]'
+                    : 'text-[#4A4A4A]'
+                }`}
+              >
+                <Coins className="w-3.5 h-3.5" />
+                CDP Vault
               </button>
             </div>
 
@@ -127,15 +143,15 @@ export const DepositModal: React.FC<DepositModalProps> = ({
             <div className="p-4 rounded-2xl bg-white/70 border border-[#1E1E1E]/15 mb-6 space-y-2 text-xs">
               <div className="flex items-center justify-between text-[#4A4A4A]">
                 <span>FAsset / Token:</span>
-                <span className="font-bold text-[#1E1E1E]">{amount || 0} {asset === 'XRP' ? 'FXRP' : 'USDC.e'}</span>
+                <span className="font-bold text-[#1E1E1E]">{amount || 0} {asset === 'CDP' ? 'CDP' : asset === 'XRP' ? 'FXRP' : 'USDC.e'}</span>
               </div>
               <div className="flex items-center justify-between text-[#4A4A4A]">
                 <span>Target Vault:</span>
-                <span className="font-bold text-[#E1BAC2]">{asset === 'XRP' ? 'Kinetic Strategy' : 'Enosys Strategy'}</span>
+                <span className="font-bold text-[#E1BAC2]">{asset === 'CDP' ? 'CDP Vault (Enosys V3 LP)' : asset === 'XRP' ? 'Kinetic Strategy' : 'Enosys Strategy'}</span>
               </div>
               <div className="flex items-center justify-between text-[#4A4A4A]">
                 <span>Vault Share Token:</span>
-                <span className="font-bold text-[#1E1E1E]">Flux Token</span>
+                <span className="font-bold text-[#1E1E1E]">{asset === 'CDP' ? 'fyCDP Token' : 'Flux Token'}</span>
               </div>
             </div>
 
@@ -175,11 +191,11 @@ export const DepositModal: React.FC<DepositModalProps> = ({
             <div className="p-4 rounded-2xl bg-white/70 border border-[#1E1E1E]/15 mb-6 text-xs text-left space-y-2">
               <div className="flex justify-between">
                 <span className="text-[#4A4A4A]">Deposited:</span>
-                <span className="font-bold text-[#1E1E1E]">{amount} {asset === 'XRP' ? 'USDC.e' : 'FXRP'}</span>
+                <span className="font-bold text-[#1E1E1E]">{amount} {asset === 'CDP' ? 'CDP' : asset === 'XRP' ? 'USDC.e' : 'FXRP'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-[#4A4A4A]">Vault Shares:</span>
-                <span className="font-bold text-[#E1BAC2]">{amount} Flux</span>
+                <span className="font-bold text-[#E1BAC2]">{amount} {asset === 'CDP' ? 'fyCDP' : 'Flux'}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-[#4A4A4A]">Network:</span>

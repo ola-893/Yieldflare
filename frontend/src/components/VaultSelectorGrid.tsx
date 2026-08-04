@@ -78,6 +78,24 @@ export const VAULTS_DATA: VaultInfo[] = [
       'Price data verified before trades',
     ]
   },
+  {
+    id: 'enosys-cdp-strategy',
+    name: 'Enosys CDP LP',
+    assetSymbol: 'CDP',
+    strategyType: 'Enosys CDP LP' as const,
+    projectedApy: '~8-20%',
+    status: 'Deployed',
+    primaryProtocol: 'Enosys DEX',
+    primaryProtocolUrl: 'https://enosys.global',
+    contractAddress: CONTRACTS.strategies.enosysCdpLp,
+    description: 'Provide concentrated liquidity on Enosys DEX for the CDP/WC2FLR pair. Earn trading fees from stablecoin swaps with lower volatility.',
+    details: [
+      'Stablecoin LP — lower impermanent loss',
+      'Earn 0.30% swap fees on CDP/WC2FLR',
+      'Concentrated liquidity for higher capital efficiency',
+      'Stable yield for risk-averse users',
+    ]
+  },
 ];
 
 interface VaultSelectorGridProps {
@@ -99,7 +117,7 @@ export const VaultSelectorGrid: React.FC<VaultSelectorGridProps> = ({ onConnectW
           <Check className="w-5 h-5 text-emerald-600 shrink-0" />
           <div>
             <p className="text-sm font-bold text-emerald-800" style={{ fontFamily: 'Manrope, sans-serif' }}>
-              4 Strategies Deployed & Ready
+              5 Strategies Deployed & Ready
             </p>
             <p className="text-xs text-emerald-700">
               All yield strategies are deployed on Coston2 testnet. Capital deployment pending TEE activation.

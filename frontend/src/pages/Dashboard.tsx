@@ -2,12 +2,13 @@ import React, {useState} from 'react';
 import {useAccount, useBalance, useReadContract} from 'wagmi';
 import {formatUnits} from 'viem';
 import {motion} from 'motion/react';
-import {TrendingUp, Layers, Clock, ArrowUpRight, ArrowDownRight, Wallet, RefreshCw, Zap, ShieldCheck, Copy, Check, ChevronRight, ArrowRight, Cpu, Lock, Server} from 'lucide-react';
+import {TrendingUp, Layers, Clock, ArrowUpRight, ArrowDownRight, Wallet, RefreshCw, Zap, ShieldCheck, Copy, Check, ChevronRight, ArrowRight, Cpu, Lock, Server, Coins} from 'lucide-react';
 import xrpImg from '../assets/images/xrp.webp';
 import {CONTRACTS, PARENT_VAULT_ABI} from '../config/contracts';
 import {StrategiesModal} from '../components/StrategiesModal';
 
 const PARENT_VAULT_ADDRESS: `0x${string}` = CONTRACTS.parentVault;
+const CDP_VAULT_ADDRESS: `0x${string}` = CONTRACTS.vaults.cdpVault;
 
 interface DashboardProps {
   onNavigateToDeposit: () => void;
@@ -22,6 +23,7 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
 
   // Check if contract address is deployed (not zero address)
   const isDeployed = PARENT_VAULT_ADDRESS !== '0x0000000000000000000000000000000000000000';
+  const isCdpDeployed = CDP_VAULT_ADDRESS !== '0x0000000000000000000000000000000000000000';
 
   // Read vault data
   const {data: totalAssets} = useReadContract({
@@ -73,9 +75,9 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
   const hasActiveStrategy = activeStrategy && activeStrategy !== '0x0000000000000000000000000000000000000000';
 
   // Strategy info mapping
-  const getStrategyInfo = (addr: string | undefined) => {
+  const getStrategyInfo = (addr: string | undefined): {name: string; description: string; apy: string} => {
     if (!addr || addr === '0x0000000000000000000000000000000000000000') {
-      return {name: 'Awaiting Deployment', description: 'Deposit FXRP to activate automatic yield generation'};
+      return {name: 'Awaiting Deployment', description: 'Deposit FXRP to activate automatic yield generation', apy: 'N/A'};
     }
     const strategies: Record<string, {name: string; description: string; apy: string}> = {
       [CONTRACTS.strategies.ftsoV2Delegation]: {
@@ -98,11 +100,64 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
         description: 'Cross-chain liquidity',
         apy: '8-14%'
       },
+      [CONTRACTS.strategies.enosysCdpLp]: {
+        name: 'Enosys CDP LP',
+        description: 'CDP/WC2FLR concentrated liquidity',
+        apy: '8-20%'
+      },
     };
-    return strategies[addr] || {name: 'Active Strategy', description: 'Yield generation active', apy: 'N/A'};
+    if (strategies[addr]) return strategies[addr];
+    return {name: 'Active Strategy', description: 'Yield generation active', apy: 'N/A'};
   };
 
   const strategyInfo = getStrategyInfo(activeStrategy);
+
+  // ─── CDP Vault Reads ──────────────────────────────────────────────────────
+  const {data: cdpTotalAssets} = useReadContract({
+    address: CDP_VAULT_ADDRESS,
+    abi: PARENT_VAULT_ABI,
+    functionName: 'totalAssets',
+    query: {enabled: isCdpDeployed},
+  });
+
+  const {data: cdpTotalSupply} = useReadContract({
+    address: CDP_VAULT_ADDRESS,
+    abi: PARENT_VAULT_ABI,
+    functionName: 'totalSupply',
+    query: {enabled: isCdpDeployed},
+  });
+
+  const {data: cdpUserShares} = useReadContract({
+    address: CDP_VAULT_ADDRESS,
+    abi: PARENT_VAULT_ABI,
+    functionName: 'balanceOf',
+    args: address ? [address] : undefined,
+    query: {enabled: isCdpDeployed && !!address},
+  });
+
+  const {data: cdpActiveStrategy} = useReadContract({
+    address: CDP_VAULT_ADDRESS,
+    abi: PARENT_VAULT_ABI,
+    functionName: 'activeStrategy',
+    query: {enabled: isCdpDeployed},
+  });
+
+  const {data: cdpVaultDecimals} = useReadContract({
+    address: CDP_VAULT_ADDRESS,
+    abi: PARENT_VAULT_ABI,
+    functionName: 'decimals',
+    query: {enabled: isCdpDeployed},
+  });
+  const cdpDecimals = cdpVaultDecimals ?? 18;
+
+  // Calculate CDP values
+  const cdpSharePrice = cdpTotalAssets && cdpTotalSupply && cdpTotalSupply > 0n
+    ? Number(formatUnits(cdpTotalAssets, cdpDecimals)) / Number(formatUnits(cdpTotalSupply, cdpDecimals))
+    : 1;
+  const cdpUserShareBalance = cdpUserShares ? Number(formatUnits(cdpUserShares, cdpDecimals)) : 0;
+  const cdpTotalAssetsFormatted = cdpTotalAssets ? Number(formatUnits(cdpTotalAssets, cdpDecimals)) : 0;
+  const cdpHasActiveStrategy = cdpActiveStrategy && cdpActiveStrategy !== '0x0000000000000000000000000000000000000000';
+  const cdpStrategyInfo = getStrategyInfo(cdpActiveStrategy);
 
   const copyAddress = () => {
     if (address) {
@@ -345,6 +400,120 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
             <ChevronRight className="w-4 h-4" />
           </button>
         </motion.div>
+
+        {/* ─── CDP Vault Card ─── */}
+        {isCdpDeployed && (
+          <motion.div
+            initial={{opacity: 0, y: 20}}
+            animate={{opacity: 1, y: 0}}
+            transition={{duration: 0.5, delay: 0.35}}
+            className="mb-8 glass-panel p-6 sm:p-8 rounded-3xl border border-[#E1BAC2]/30 shadow-soft-editorial bg-white/60"
+          >
+            <div className="flex items-center justify-between mb-6 pb-4 border-b border-[#1E1E1E]/10">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-[#E1BAC2]/20 flex items-center justify-center">
+                  <Coins className="w-5 h-5 text-[#E1BAC2]" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-[#1E1E1E]" style={{fontFamily: 'Manrope, sans-serif'}}>
+                    CDP Vault <span className="text-xs font-mono text-[#4A4A4A]">(fyCDP)</span>
+                  </h3>
+                  <p className="text-[10px] text-[#4A4A4A] mt-0.5">
+                    Stablecoin yield via Enosys V3 CDP/WC2FLR LP
+                  </p>
+                </div>
+              </div>
+              <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[10px] font-mono font-bold border ${
+                cdpHasActiveStrategy
+                  ? 'bg-emerald-500/10 text-emerald-600 border-emerald-500/20'
+                  : 'bg-amber-500/10 text-amber-600 border-amber-500/20'
+              }`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${cdpHasActiveStrategy ? 'bg-emerald-500' : 'bg-amber-500'} animate-pulse`} />
+                {cdpHasActiveStrategy ? 'Earning Yield' : 'Awaiting Deposit'}
+              </div>
+            </div>
+
+            {/* CDP Vault Stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+              <div className="p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
+                <p className="text-[10px] font-mono text-[#4A4A4A] uppercase tracking-wider mb-1">Your fyCDP</p>
+                <p className="text-sm font-bold text-[#1E1E1E]">
+                  {cdpUserShareBalance > 0 ? cdpUserShareBalance.toFixed(4) : '0'}
+                </p>
+                <p className="text-[10px] text-[#4A4A4A] mt-0.5">
+                  {cdpUserShareBalance > 0 ? `≈ ${cdpUserShareBalance.toFixed(4)} CDP` : 'Deposit CDP to start'}
+                </p>
+              </div>
+              <div className="p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
+                <p className="text-[10px] font-mono text-[#4A4A4A] uppercase tracking-wider mb-1">Share Price</p>
+                <p className="text-sm font-bold text-[#1E1E1E]">{cdpSharePrice.toFixed(6)}</p>
+                <p className="text-[10px] text-[#4A4A4A] mt-0.5">CDP per fyCDP</p>
+              </div>
+              <div className="p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
+                <p className="text-[10px] font-mono text-[#4A4A4A] uppercase tracking-wider mb-1">Vault TVL</p>
+                <p className="text-sm font-bold text-[#1E1E1E]">{cdpTotalAssetsFormatted > 0 ? cdpTotalAssetsFormatted.toFixed(2) : '0'}</p>
+                <p className="text-[10px] text-[#4A4A4A] mt-0.5">CDP deposited</p>
+              </div>
+              <div className="p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
+                <p className="text-[10px] font-mono text-[#4A4A4A] uppercase tracking-wider mb-1">Strategy</p>
+                <p className="text-sm font-bold text-[#1E1E1E]">{cdpStrategyInfo.name}</p>
+                <p className="text-[10px] text-emerald-600 font-bold mt-0.5">APY {cdpStrategyInfo.apy}</p>
+              </div>
+            </div>
+
+            {/* CDP Strategy Info */}
+            {cdpHasActiveStrategy && (
+              <div className="p-4 rounded-2xl bg-[#E1BAC2]/5 border border-[#E1BAC2]/20 mb-6">
+                <div className="flex items-start gap-3">
+                  <Coins className="w-5 h-5 text-[#E1BAC2] shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-bold text-[#1E1E1E] mb-1">{cdpStrategyInfo.name} — Active</p>
+                    <p className="text-[11px] text-[#4A4A4A] leading-relaxed">
+                      {cdpStrategyInfo.description}. Your CDP is deployed in a CDP/WC2FLR concentrated liquidity pool on Enosys DEX, earning trading fees.
+                    </p>
+                    <p className="text-[10px] font-mono text-[#4A4A4A] mt-2 bg-white/60 inline-block px-2 py-1 rounded">
+                      {cdpActiveStrategy?.toString().slice(0, 6)}...{cdpActiveStrategy?.toString().slice(-4)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* CDP Warning: No Strategy */}
+            {!cdpHasActiveStrategy && cdpTotalAssetsFormatted > 0 && (
+              <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200">
+                <div className="flex items-start gap-3">
+                  <Zap className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="text-xs font-bold text-amber-800 mb-1">CDP Strategy Not Yet Deployed</p>
+                    <p className="text-[11px] text-amber-700 leading-relaxed">
+                      Your {cdpTotalAssetsFormatted.toFixed(2)} CDP is safely held in the vault. The Enosys CDP LP strategy will be activated by the TEE once deployed.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* CDP Quick Actions */}
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={onNavigateToDeposit}
+                className="py-3 rounded-xl bg-[#1E1E1E] text-[#E1BAC2] text-[11px] font-bold uppercase tracking-[0.12em] hover:bg-[#000000] transition-all flex items-center justify-center gap-2"
+              >
+                <ArrowDownRight className="w-3.5 h-3.5" />
+                Deposit CDP
+              </button>
+              <button
+                onClick={onNavigateToWithdraw}
+                disabled={cdpUserShareBalance === 0}
+                className="py-3 rounded-xl bg-white border border-[#1E1E1E]/15 text-[#1E1E1E] text-[11px] font-bold uppercase tracking-[0.12em] hover:border-[#E1BAC2] hover:text-[#E1BAC2] transition-all disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                <ArrowUpRight className="w-3.5 h-3.5" />
+                {cdpUserShareBalance > 0 ? 'Withdraw CDP' : 'No fyCDP'}
+              </button>
+            </div>
+          </motion.div>
+        )}
 
         {/* ─── Quick Actions ─── */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">

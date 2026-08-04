@@ -99,6 +99,7 @@ export const PARENT_VAULT_ABI = [
   {type:'function',name:'transfer',stateMutability:'nonpayable',inputs:[{name:'to',type:'address'},{name:'amount',type:'uint256'}],outputs:[{name:'',type:'bool'}]},
   {type:'function',name:'transferFrom',stateMutability:'nonpayable',inputs:[{name:'from',type:'address'},{name:'to',type:'address'},{name:'amount',type:'uint256'}],outputs:[{name:'',type:'bool'}]},
   // FlareYield specific
+  {type:'function',name:'activeStrategy',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
   {type:'function',name:'fAssetAdapter',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
   {type:'function',name:'totalPendingFAssetDeposits',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint256'}]},
   {type:'function',name:'pendingFAssetDeposits',stateMutability:'view',inputs:[{name:'depositId',type:'bytes32'}],outputs:[{name:'receiver',type:'address'},{name:'queuedAt',type:'uint256'}]},

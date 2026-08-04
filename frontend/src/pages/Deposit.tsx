@@ -1,13 +1,16 @@
-import React, {useState, useEffect} from 'react';
+import React, {useState, useEffect, useMemo} from 'react';
 import {useAccount, useWriteContract, useWaitForTransactionReceipt, useReadContract, useBalance} from 'wagmi';
-import {decodeEventLog} from 'viem';
+import {decodeEventLog, parseUnits, formatUnits} from 'viem';
 import {motion, AnimatePresence} from 'motion/react';
-import {Lock, RefreshCw, Check, ArrowRight, Copy, Clock, AlertCircle} from 'lucide-react';
+import {Lock, RefreshCw, Check, ArrowRight, Copy, Clock, AlertCircle, Coins, ShieldCheck, Wallet} from 'lucide-react';
 import xrpImg from '../assets/images/xrp.webp';
 import btcImg from '../assets/images/btc.webp';
-import {CONTRACTS, FASSET_ADAPTER_ABI, ASSET_MANAGER_ABI, MINTING_TAG_MANAGER_ABI} from '../config/contracts';
+import {CONTRACTS, FASSET_ADAPTER_ABI, ASSET_MANAGER_ABI, MINTING_TAG_MANAGER_ABI, PARENT_VAULT_ABI} from '../config/contracts';
 
-type DepositStep = 'SELECT' | 'RESERVE_TAG' | 'AWAITING_DEPOSIT' | 'READY_TO_SETTLE' | 'SETTLING' | 'COMPLETE';
+type DepositFlow = 'FASSET' | 'ERC4626';
+type FassetStep = 'SELECT' | 'RESERVE_TAG' | 'AWAITING_DEPOSIT' | 'READY_TO_SETTLE' | 'SETTLING' | 'COMPLETE';
+type Erc4626Step = 'ERC4626_SELECT' | 'APPROVE' | 'APPROVING' | 'DEPOSIT' | 'DEPOSITING' | 'COMPLETE_CDP';
+type DepositStep = FassetStep | Erc4626Step;
 
 // Object-format ABI for decodeEventLog (human-readable strings don't work here)
 const EVENT_ABI = [{
@@ -19,6 +22,16 @@ const EVENT_ABI = [{
     {indexed: true, name: 'executor', type: 'address'},
   ],
 }] as const;
+
+// Minimal ERC20 ABI for CDP token interactions
+const ERC20_ABI = [
+  {type:'function',name:'name',stateMutability:'view',inputs:[],outputs:[{name:'',type:'string'}]},
+  {type:'function',name:'symbol',stateMutability:'view',inputs:[],outputs:[{name:'',type:'string'}]},
+  {type:'function',name:'decimals',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint8'}]},
+  {type:'function',name:'balanceOf',stateMutability:'view',inputs:[{name:'account',type:'address'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'allowance',stateMutability:'view',inputs:[{name:'owner',type:'address'},{name:'spender',type:'address'}],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'approve',stateMutability:'nonpayable',inputs:[{name:'spender',type:'address'},{name:'amount',type:'uint256'}],outputs:[{name:'',type:'bool'}]},
+] as const;
 
 interface DepositPageProps {
   onBack: () => void;
@@ -46,6 +59,9 @@ const useCoreVaultAddress = () => {
 
 export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const {address, isConnected} = useAccount();
+
+  // Flow state
+  const [depositFlow, setDepositFlow] = useState<DepositFlow>('FASSET');
   const [step, setStep] = useState<DepositStep>('SELECT');
   const [asset, setAsset] = useState<'XRP' | 'BTC'>('XRP');
   const [reservedTag, setReservedTag] = useState<string | null>(null);
@@ -54,8 +70,11 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const [xrplTxHash, setXrplTxHash] = useState<string | null>(null);
   const [xrplAmount, setXrplAmount] = useState<string | null>(null);
 
+  // CDP-specific state
+  const [cdpAmount, setCdpAmount] = useState('');
+  const [cdpTxHash, setCdpTxHash] = useState<`0x${string}` | undefined>();
+
   // Always start at SELECT phase — but remember any previously saved tag.
-  // On reserve click, we check both localStorage and on-chain for existing tags.
   const [savedTag, setSavedTag] = useState<string | null>(null);
 
   useEffect(() => {
@@ -65,24 +84,20 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
         const parsed = JSON.parse(saved);
         if (parsed.tag) {
           setSavedTag(parsed.tag);
-          console.log('[Deposit] Found saved tag in localStorage:', parsed.tag);
         }
       } catch { /* ignore */ }
     }
   }, []);
 
-  // Check on-chain for existing reserved tags for this user (may not include FAssetAdapter tags)
+  // ─── FAsset Flow Hooks ────────────────────────────────────────────────────
   const {data: userReservedTags, isLoading: isTagsLoading} = useReadContract({
     address: CONTRACTS.mintingTagManager,
     abi: MINTING_TAG_MANAGER_ABI,
     functionName: 'reservedTagsForOwner',
     args: address ? [address] : undefined,
-    query: {
-      enabled: !!address,
-    },
+    query: {enabled: !!address && depositFlow === 'FASSET'},
   });
   const existingTags = (userReservedTags as bigint[] | undefined) ?? [];
-  // User has an existing tag if found on-chain OR in localStorage
   const hasExistingTag = existingTags.length > 0 || !!savedTag;
 
   const saveState = (s: DepositStep, tag?: string, depId?: string) => {
@@ -91,40 +106,28 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
       tag: tag || reservedTag,
       asset,
       depositId: depId || depositId,
+      depositFlow,
     }));
   };
 
-  // Register minting tag
   const {writeContract: registerTag, data: registerHash, isPending: isRegistering, error: registerError} = useWriteContract();
   const {isLoading: isRegisterConfirming, data: registerReceipt, error: registerReceiptError} = useWaitForTransactionReceipt({hash: registerHash});
 
-  // Settle direct mint
   const {writeContract: settleMint, data: settleHash, isPending: isSettling} = useWriteContract();
   const {isLoading: isSettleConfirming} = useWaitForTransactionReceipt({hash: settleHash});
 
-  // Read the actual reservation fee from the MintingTagManager contract
   const {data: reservationFeeRaw, isLoading: isFeeLoading, error: feeError} = useReadContract({
     address: CONTRACTS.mintingTagManager,
     abi: MINTING_TAG_MANAGER_ABI,
     functionName: 'reservationFee',
-    query: {
-      retry: 2,
-      staleTime: 30_000,
-    },
+    query: {retry: 2, staleTime: 30_000},
   });
-  // Fall back to 0 if the read fails (e.g. contract doesn't expose the function)
   const reservationFee: bigint = (reservationFeeRaw as bigint | undefined) ?? 0n;
-  // Debug: log the fee value
-  console.log('[Deposit] reservationFeeRaw:', reservationFeeRaw, 'reservationFee:', reservationFee.toString());
 
-  // Check user's native C2FLR balance
   const {data: balanceData} = useBalance({address});
   const nativeBalance = balanceData?.value ?? 0n;
   const hasEnoughBalance = nativeBalance >= reservationFee;
 
-  // No auto-recovery timers - show error UI and let user decide
-
-  // Poll for pending deposit (only when contract address is deployed)
   const isDeployed = CONTRACTS.fAssetAdapter !== '0x0000000000000000000000000000000000000000';
   const {data: pendingDepositRaw} = useReadContract({
     address: CONTRACTS.fAssetAdapter,
@@ -138,7 +141,6 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   });
   const pendingDeposit = pendingDepositRaw as string | undefined;
 
-  // Check if deposit is ready to settle
   useEffect(() => {
     if (pendingDeposit && pendingDeposit !== '0x0000000000000000000000000000000000000000000000000000000000000000') {
       setDepositId(pendingDeposit);
@@ -147,7 +149,6 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
     }
   }, [pendingDeposit]);
 
-  // After registration tx confirms, extract real tag from MintingTagRegistered event logs
   useEffect(() => {
     if (registerReceipt && !isRegisterConfirming && step === 'RESERVE_TAG') {
       try {
@@ -182,7 +183,6 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
     }
   }, [registerReceipt, isRegisterConfirming, step]);
 
-  // After settle tx confirms
   useEffect(() => {
     if (settleHash && !isSettleConfirming) {
       setStep('COMPLETE');
@@ -191,24 +191,20 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   }, [settleHash, isSettleConfirming]);
 
   const handleReserveTag = () => {
-    // Check on-chain first, then localStorage for an existing tag
     if (existingTags.length > 0) {
       const existingTag = existingTags[0].toString();
-      console.log('[Deposit] Found on-chain tag:', existingTag, '— skipping to AWAITING_DEPOSIT');
       setReservedTag(existingTag);
       saveState('AWAITING_DEPOSIT', existingTag);
       setStep('AWAITING_DEPOSIT');
       return;
     }
     if (savedTag) {
-      console.log('[Deposit] Found saved tag:', savedTag, '— skipping to AWAITING_DEPOSIT');
       setReservedTag(savedTag);
       saveState('AWAITING_DEPOSIT', savedTag);
       setStep('AWAITING_DEPOSIT');
       return;
     }
 
-    // No existing tag found — register a new one
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerTag({
       address: CONTRACTS.fAssetAdapter,
@@ -240,45 +236,180 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
     }
   };
 
-  // Fetch the FAsset Core Vault XRPL address (must be above early return per React Rules of Hooks)
   const {coreVaultAddress, isLoading: isVaultLoading} = useCoreVaultAddress();
   const [vaultCopied, setVaultCopied] = useState(false);
 
-  // Read deposit amount from FAssetAdapter contract (faster than XRPL API)
   const {data: pendingDirectMint} = useReadContract({
     address: CONTRACTS.fAssetAdapter,
     abi: FASSET_ADAPTER_ABI,
     functionName: 'pendingDirectMints',
     args: depositId ? [depositId as `0x${string}`] : undefined,
-    query: {
-      enabled: step === 'READY_TO_SETTLE' && !!depositId,
-    },
+    query: {enabled: step === 'READY_TO_SETTLE' && !!depositId},
   });
 
-  // Set amount from contract data (assets is in 6 decimals for FXRP)
   useEffect(() => {
     if (pendingDirectMint && step === 'READY_TO_SETTLE') {
-      const assets = (pendingDirectMint as any)[2]; // third return value is assets (uint256)
+      const assets = (pendingDirectMint as any)[2];
       if (assets && assets > 0n) {
-        setXrplAmount((Number(assets) / 1e6).toFixed(6)); // FXRP has 6 decimals
+        setXrplAmount((Number(assets) / 1e6).toFixed(6));
       }
     }
   }, [pendingDirectMint, step]);
 
-  const handleReset = () => {
-    localStorage.removeItem('flux-deposit-state');
-    setStep('SELECT');
-    setReservedTag(null);
-    setDepositId(null);
+  // ─── CDP ERC-4626 Flow Hooks ──────────────────────────────────────────────
+
+  // Read user's CDP token balance
+  const {data: cdpBalanceRaw, refetch: refetchCdpBalance} = useReadContract({
+    address: CONTRACTS.tokens.cdp,
+    abi: ERC20_ABI,
+    functionName: 'balanceOf',
+    args: address ? [address] : undefined,
+    query: {enabled: !!address && depositFlow === 'ERC4626'},
+  });
+  const cdpBalance = cdpBalanceRaw as bigint | undefined;
+
+  // Read CDP token decimals
+  const {data: cdpDecimalsRaw} = useReadContract({
+    address: CONTRACTS.tokens.cdp,
+    abi: ERC20_ABI,
+    functionName: 'decimals',
+    query: {enabled: depositFlow === 'ERC4626'},
+  });
+  const cdpDecimals = (cdpDecimalsRaw as number | undefined) ?? 18;
+
+  // Read CDP allowance
+  const {data: cdpAllowanceRaw, refetch: refetchCdpAllowance} = useReadContract({
+    address: CONTRACTS.tokens.cdp,
+    abi: ERC20_ABI,
+    functionName: 'allowance',
+    args: address ? [address, CONTRACTS.vaults.cdpVault] : undefined,
+    query: {enabled: !!address && depositFlow === 'ERC4626' && step === 'APPROVE'},
+  });
+  const cdpAllowance = cdpAllowanceRaw as bigint | undefined;
+
+  // Read vault maxDeposit
+  const {data: maxDepositRaw} = useReadContract({
+    address: CONTRACTS.vaults.cdpVault,
+    abi: PARENT_VAULT_ABI,
+    functionName: 'maxDeposit',
+    args: address ? [address] : undefined,
+    query: {enabled: !!address && depositFlow === 'ERC4626'},
+  });
+  const maxDeposit = maxDepositRaw as bigint | undefined;
+
+  // Read vault totalAssets
+  const {data: vaultTotalAssetsRaw} = useReadContract({
+    address: CONTRACTS.vaults.cdpVault,
+    abi: PARENT_VAULT_ABI,
+    functionName: 'totalAssets',
+    query: {enabled: depositFlow === 'ERC4626'},
+  });
+  const vaultTotalAssets = vaultTotalAssetsRaw as bigint | undefined;
+
+  // Parse user input to bigint
+  const parsedCdpAmount = useMemo(() => {
+    if (!cdpAmount || cdpAmount === '' || cdpAmount === '0') return 0n;
+    try {
+      return parseUnits(cdpAmount, cdpDecimals);
+    } catch {
+      return 0n;
+    }
+  }, [cdpAmount, cdpDecimals]);
+
+  // Preview shares for the deposit amount
+  const {data: previewSharesRaw} = useReadContract({
+    address: CONTRACTS.vaults.cdpVault,
+    abi: PARENT_VAULT_ABI,
+    functionName: 'previewDeposit',
+    args: parsedCdpAmount > 0n ? [parsedCdpAmount] : undefined,
+    query: {enabled: parsedCdpAmount > 0n && depositFlow === 'ERC4626'},
+  });
+  const previewShares = previewSharesRaw as bigint | undefined;
+
+  // Check if approval is needed — when allowance is still loading, assume approval is needed
+  const needsApproval = parsedCdpAmount > 0n && (cdpAllowance === undefined || cdpAllowance < parsedCdpAmount);
+
+  // Write: Approve CDP to vault
+  const {writeContract: approveCdp, data: approveHash, isPending: isApproving, error: approveError} = useWriteContract();
+  const {isLoading: isApproveConfirming, error: approveReceiptError} = useWaitForTransactionReceipt({hash: approveHash});
+
+  // Write: Deposit CDP to vault
+  const {writeContract: depositCdp, data: depositHash, isPending: isDepositing, error: depositError} = useWriteContract();
+  const {isLoading: isDepositConfirming} = useWaitForTransactionReceipt({hash: depositHash});
+
+  const handleApproveCdp = () => {
+    if (parsedCdpAmount <= 0n || !address) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    approveCdp({
+      address: CONTRACTS.tokens.cdp,
+      abi: ERC20_ABI as any,
+      functionName: 'approve',
+      args: [CONTRACTS.vaults.cdpVault, parsedCdpAmount],
+    } as any);
+    setStep('APPROVING');
   };
 
-  // Start a new deposit using the existing registered tag (no re-registration needed)
-  const handleNewDeposit = () => {
+  const handleDepositCdp = () => {
+    if (parsedCdpAmount <= 0n || !address) return;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    depositCdp({
+      address: CONTRACTS.vaults.cdpVault,
+      abi: PARENT_VAULT_ABI as any,
+      functionName: 'deposit',
+      args: [parsedCdpAmount, address!],
+    } as any);
+    setStep('DEPOSITING');
+  };
+
+  // After approval confirms, move to deposit step
+  useEffect(() => {
+    if (approveHash && !isApproveConfirming && step === 'APPROVING') {
+      refetchCdpAllowance();
+      setStep('DEPOSIT');
+    }
+  }, [approveHash, isApproveConfirming, step, refetchCdpAllowance]);
+
+  // After deposit confirms, move to complete
+  useEffect(() => {
+    if (depositHash && !isDepositConfirming && step === 'DEPOSITING') {
+      setCdpTxHash(depositHash);
+      refetchCdpBalance();
+      setStep('COMPLETE_CDP');
+    }
+  }, [depositHash, isDepositConfirming, step, refetchCdpBalance]);
+
+  // ─── Reset ────────────────────────────────────────────────────────────────
+  const handleReset = () => {
+    localStorage.removeItem('flux-deposit-state');
+    setStep(depositFlow === 'ERC4626' ? 'ERC4626_SELECT' : 'SELECT');
+    setReservedTag(null);
     setDepositId(null);
-    setXrplTxHash(null);
-    setXrplAmount(null);
-    setStep('AWAITING_DEPOSIT');
-    saveState('AWAITING_DEPOSIT');
+    setCdpAmount('');
+    setCdpTxHash(undefined);
+  };
+
+  const handleNewDeposit = () => {
+    if (depositFlow === 'ERC4626') {
+      setStep('ERC4626_SELECT');
+      setCdpAmount('');
+      setCdpTxHash(undefined);
+    } else {
+      setDepositId(null);
+      setXrplTxHash(null);
+      setXrplAmount(null);
+      setStep('AWAITING_DEPOSIT');
+      saveState('AWAITING_DEPOSIT');
+    }
+  };
+
+  const switchToErc4626 = () => {
+    setDepositFlow('ERC4626');
+    setStep('ERC4626_SELECT');
+  };
+
+  const switchToFasset = () => {
+    setDepositFlow('FASSET');
+    setStep('SELECT');
   };
 
   if (!isConnected) {
@@ -306,6 +437,11 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
     }
   };
 
+  // Determine current step index for indicator
+  const fassetSteps = ['SELECT', 'RESERVE_TAG', 'AWAITING_DEPOSIT', 'READY_TO_SETTLE', 'COMPLETE'];
+  const erc4626Steps = ['ERC4626_SELECT', 'APPROVE', 'DEPOSIT', 'COMPLETE_CDP'];
+  const currentSteps = depositFlow === 'FASSET' ? fassetSteps : erc4626Steps;
+
   return (
     <div className="min-h-screen bg-[#F5F5F3] pt-24 pb-16">
       <div className="max-w-2xl mx-auto px-4 sm:px-6">
@@ -319,22 +455,51 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
         <motion.div initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} className="mb-10">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-[#1E1E1E]/20 text-[#1E1E1E] text-[10px] font-mono font-bold uppercase tracking-wider mb-3 bg-white/40">
             <Lock className="w-3 h-3 text-[#E1BAC2]" />
-            <span>FAsset Deposit Flow</span>
+            <span>{depositFlow === 'ERC4626' ? 'ERC-4626 Direct Deposit' : 'FAsset Deposit Flow'}</span>
           </div>
           <h1 className="text-3xl font-extrabold text-[#1E1E1E]" style={{fontFamily: 'Manrope, sans-serif'}}>
-            Deposit Native Assets
+            {depositFlow === 'ERC4626' ? 'Deposit CDP Stablecoin' : 'Deposit Native Assets'}
           </h1>
           <p className="text-sm text-[#4A4A4A] mt-2">
-            Send native XRP or BTC → FAssets are minted → Flux tokens are issued
+            {depositFlow === 'ERC4626'
+              ? 'Deposit CDP tokens directly into the vault to earn yield from Enosys V3 LP'
+              : 'Send native XRP or BTC → FAssets are minted → Flux tokens are issued'}
           </p>
         </motion.div>
 
+        {/* Flow Toggle */}
+        <div className="flex items-center gap-2 mb-8 p-1.5 rounded-2xl border border-[#1E1E1E]/15 bg-white/40">
+          <button
+            onClick={switchToFasset}
+            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+              depositFlow === 'FASSET'
+                ? 'bg-[#1E1E1E] text-[#E1BAC2]'
+                : 'text-[#4A4A4A] hover:text-[#1E1E1E]'
+            }`}
+          >
+            <Coins className="w-3.5 h-3.5" />
+            Native Deposit (XRP)
+          </button>
+          <button
+            onClick={switchToErc4626}
+            className={`flex-1 py-2.5 rounded-xl text-xs font-bold transition-all flex items-center justify-center gap-2 ${
+              depositFlow === 'ERC4626'
+                ? 'bg-[#1E1E1E] text-[#E1BAC2]'
+                : 'text-[#4A4A4A] hover:text-[#1E1E1E]'
+            }`}
+          >
+            <Wallet className="w-3.5 h-3.5" />
+            CDP Deposit (ERC-4626)
+          </button>
+        </div>
+
         {/* Step Indicator */}
-        <StepIndicator currentStep={step} />
+        <StepIndicator steps={currentSteps} currentStep={step} />
 
         {/* Step Content */}
         <AnimatePresence mode="wait">
-          {step === 'SELECT' && (
+          {/* ═══ FAsset Flow ═══ */}
+          {depositFlow === 'FASSET' && step === 'SELECT' && (
             <StepSelectAsset
               key="select"
               asset={asset}
@@ -350,7 +515,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
             />
           )}
 
-          {step === 'RESERVE_TAG' && (
+          {depositFlow === 'FASSET' && step === 'RESERVE_TAG' && (
             <StepReserving
               key="reserving"
               isConfirming={isRegisterConfirming}
@@ -360,7 +525,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
             />
           )}
 
-          {step === 'AWAITING_DEPOSIT' && (
+          {depositFlow === 'FASSET' && step === 'AWAITING_DEPOSIT' && (
             <StepAwaitingDeposit
               key="awaiting"
               tag={reservedTag!}
@@ -374,7 +539,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
             />
           )}
 
-          {step === 'READY_TO_SETTLE' && (
+          {depositFlow === 'FASSET' && step === 'READY_TO_SETTLE' && (
             <StepReadyToSettle
               key="settle"
               depositId={depositId!}
@@ -386,12 +551,86 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
             />
           )}
 
-          {step === 'SETTLING' && (
+          {depositFlow === 'FASSET' && step === 'SETTLING' && (
             <StepSettling key="settling" />
           )}
 
-          {step === 'COMPLETE' && (
+          {depositFlow === 'FASSET' && step === 'COMPLETE' && (
             <StepComplete key="complete" asset={asset} onReset={handleReset} onBack={onBack} onNewDeposit={handleNewDeposit} />
+          )}
+
+          {/* ═══ CDP ERC-4626 Flow ═══ */}
+          {depositFlow === 'ERC4626' && step === 'ERC4626_SELECT' && (
+            <StepCdpSelect
+              key="cdp-select"
+              cdpBalance={cdpBalance}
+              cdpDecimals={cdpDecimals}
+              cdpAmount={cdpAmount}
+              setCdpAmount={setCdpAmount}
+              maxDeposit={maxDeposit}
+              vaultTotalAssets={vaultTotalAssets}
+              previewShares={previewShares}
+              needsApproval={needsApproval}
+              onApprove={handleApproveCdp}
+              onDeposit={handleDepositCdp}
+              isProcessing={false}
+              parsedCdpAmount={parsedCdpAmount}
+            />
+          )}
+
+          {depositFlow === 'ERC4626' && step === 'APPROVING' && (
+            <StepTxPending
+              key="cdp-approving"
+              title="Approving CDP spend"
+              description="Confirm the token approval in your wallet. This allows the vault to pull your CDP tokens."
+              isConfirming={isApproveConfirming}
+              error={approveError?.message || approveReceiptError?.message}
+              onRetry={handleApproveCdp}
+              onBack={() => setStep('ERC4626_SELECT')}
+            />
+          )}
+
+          {depositFlow === 'ERC4626' && step === 'DEPOSIT' && (
+            <StepCdpSelect
+              key="cdp-deposit"
+              cdpBalance={cdpBalance}
+              cdpDecimals={cdpDecimals}
+              cdpAmount={cdpAmount}
+              setCdpAmount={setCdpAmount}
+              maxDeposit={maxDeposit}
+              vaultTotalAssets={vaultTotalAssets}
+              previewShares={previewShares}
+              needsApproval={false}
+              onApprove={handleApproveCdp}
+              onDeposit={handleDepositCdp}
+              isProcessing={false}
+              approved={true}
+              parsedCdpAmount={parsedCdpAmount}
+            />
+          )}
+
+          {depositFlow === 'ERC4626' && step === 'DEPOSITING' && (
+            <StepTxPending
+              key="cdp-depositing"
+              title="Depositing CDP"
+              description="Depositing your CDP into the vault. Wait for on-chain confirmation..."
+              isConfirming={isDepositConfirming}
+              error={depositError?.message}
+              onRetry={handleDepositCdp}
+              onBack={() => setStep('DEPOSIT')}
+            />
+          )}
+
+          {depositFlow === 'ERC4626' && step === 'COMPLETE_CDP' && (
+            <StepCdpComplete
+              key="cdp-complete"
+              amount={cdpAmount}
+              previewShares={previewShares}
+              txHash={cdpTxHash}
+              onReset={handleReset}
+              onBack={onBack}
+              onNewDeposit={handleNewDeposit}
+            />
           )}
         </AnimatePresence>
 
@@ -400,36 +639,50 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   );
 };
 
-// Step Indicator
-const StepIndicator: React.FC<{currentStep: DepositStep}> = ({currentStep}) => {
-  const steps = [
-    {id: 'SELECT', label: 'Select'},
-    {id: 'RESERVE_TAG', label: 'Reserve Tag'},
-    {id: 'AWAITING_DEPOSIT', label: 'Awaiting'},
-    {id: 'READY_TO_SETTLE', label: 'Settle'},
-    {id: 'COMPLETE', label: 'Complete'},
-  ];
+// ─── Step Indicator ─────────────────────────────────────────────────────────
+const StepIndicator: React.FC<{steps: string[]; currentStep: string}> = ({steps, currentStep}) => {
+  const labels: Record<string, string> = {
+    'SELECT': 'Select',
+    'RESERVE_TAG': 'Reserve Tag',
+    'AWAITING_DEPOSIT': 'Awaiting',
+    'READY_TO_SETTLE': 'Settle',
+    'SETTLING': 'Settling',
+    'COMPLETE': 'Complete',
+    'ERC4626_SELECT': 'Amount',
+    'APPROVE': 'Approve',
+    'APPROVING': 'Approving',
+    'DEPOSIT': 'Deposit',
+    'DEPOSITING': 'Depositing',
+    'COMPLETE_CDP': 'Complete',
+  };
 
-  const stepOrder: DepositStep[] = ['SELECT', 'RESERVE_TAG', 'AWAITING_DEPOSIT', 'READY_TO_SETTLE', 'SETTLING', 'COMPLETE'];
-  const currentIndex = stepOrder.indexOf(currentStep);
+  // Deduplicate consecutive labels
+  const uniqueSteps = steps.filter((s, i) => i === 0 || labels[s] !== labels[steps[i - 1]]);
+  const currentIndex = uniqueSteps.indexOf(currentStep) !== -1
+    ? uniqueSteps.indexOf(currentStep)
+    : currentStep === 'APPROVING'
+      ? uniqueSteps.indexOf('APPROVE')
+      : currentStep === 'DEPOSITING'
+        ? uniqueSteps.indexOf('DEPOSIT')
+        : uniqueSteps.indexOf(currentStep);
 
   return (
     <div className="flex items-center justify-between mb-10 px-2">
-      {steps.map((s, i) => {
-        const isActive = stepOrder.indexOf(s.id as DepositStep) <= currentIndex;
+      {uniqueSteps.map((s, i) => {
+        const isActive = i <= currentIndex;
         return (
-          <React.Fragment key={s.id}>
+          <React.Fragment key={s}>
             <div className="flex flex-col items-center gap-1.5">
               <div className={`w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-mono font-bold transition-all ${
                 isActive ? 'bg-[#1E1E1E] text-[#F5F5F3]' : 'bg-[#1E1E1E]/10 text-[#4A4A4A]'
               }`}>
-                {isActive ? '✓' : i + 1}
+                {isActive && i < currentIndex ? '✓' : i + 1}
               </div>
               <span className={`text-[9px] font-mono uppercase tracking-wider ${isActive ? 'text-[#1E1E1E] font-bold' : 'text-[#4A4A4A]'}`}>
-                {s.label}
+                {labels[s]}
               </span>
             </div>
-            {i < steps.length - 1 && (
+            {i < uniqueSteps.length - 1 && (
               <div className={`flex-1 h-px mx-2 ${isActive ? 'bg-[#1E1E1E]' : 'bg-[#1E1E1E]/10'}`} />
             )}
           </React.Fragment>
@@ -439,7 +692,7 @@ const StepIndicator: React.FC<{currentStep: DepositStep}> = ({currentStep}) => {
   );
 };
 
-// Step 1: Select Asset
+// ─── FAsset Step 1: Select Asset ────────────────────────────────────────────
 const StepSelectAsset: React.FC<{
   asset: 'XRP' | 'BTC';
   setAsset: (a: 'XRP' | 'BTC') => void;
@@ -453,9 +706,7 @@ const StepSelectAsset: React.FC<{
   hasExistingTag: boolean;
 }> = ({asset, setAsset, onReserve, isRegistering, isFeeLoading, feeError, reservationFee, hasEnoughBalance, isTagsLoading, hasExistingTag}) => (
   <motion.div
-    initial={{opacity: 0, y: 20}}
-    animate={{opacity: 1, y: 0}}
-    exit={{opacity: 0, y: -20}}
+    initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
     className="glass-panel p-6 sm:p-8 rounded-3xl border border-[#1E1E1E]/15 shadow-soft-editorial bg-white/60"
   >
     <h3 className="text-lg font-bold text-[#1E1E1E] mb-1" style={{fontFamily: 'Manrope, sans-serif'}}>
@@ -463,7 +714,7 @@ const StepSelectAsset: React.FC<{
     </h3>
     <p className="text-xs text-[#4A4A4A] mb-6">Choose the native asset you want to deposit</p>
 
-    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
+    <div className="grid grid-cols-2 gap-4 mb-8">
       <AssetOption
         name="XRP"
         img={xrpImg}
@@ -479,15 +730,8 @@ const StepSelectAsset: React.FC<{
         onClick={() => setAsset('BTC')}
         comingSoon={true}
       />
-      <AssetOption
-        name="Enosys Loans (CDP)"
-        img={xrpImg}
-        description="CDP Vault for stable yield"
-        isSelected={false}
-        onClick={() => {}}
-        comingSoon={true}
-      />
-    </div>      <div className="p-4 rounded-2xl bg-[#F5F5F3] border border-[#1E1E1E]/10 mb-6">
+    </div>
+    <div className="p-4 rounded-2xl bg-[#F5F5F3] border border-[#1E1E1E]/10 mb-6">
       <div className="flex items-start gap-2">
         <AlertCircle className="w-4 h-4 text-[#4A4A4A] mt-0.5 shrink-0" />
         <p className="text-xs text-[#4A4A4A] leading-relaxed">
@@ -528,26 +772,17 @@ const StepSelectAsset: React.FC<{
       className="w-full py-3.5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-[#000000] transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
     >
       {isRegistering ? (
-        <>
-          <RefreshCw className="w-4 h-4 animate-spin" />
-          <span>Confirm in Wallet...</span>
-        </>
+        <><RefreshCw className="w-4 h-4 animate-spin" /><span>Confirm in Wallet...</span></>
       ) : isFeeLoading || isTagsLoading ? (
-        <>
-          <RefreshCw className="w-4 h-4 animate-spin" />
-          <span>Loading...</span>
-        </>
+        <><RefreshCw className="w-4 h-4 animate-spin" /><span>Loading...</span></>
       ) : (
-        <>
-          <span>{hasExistingTag ? 'Continue to Deposit' : 'Reserve Minting Tag'}</span>
-          <ArrowRight className="w-4 h-4" />
-        </>
+        <><span>{hasExistingTag ? 'Continue to Deposit' : 'Reserve Minting Tag'}</span><ArrowRight className="w-4 h-4" /></>
       )}
     </button>
   </motion.div>
 );
 
-// Step: Reserving Tag
+// ─── FAsset Step: Reserving Tag ─────────────────────────────────────────────
 const StepReserving: React.FC<{
   isConfirming?: boolean;
   error?: string | null;
@@ -555,9 +790,7 @@ const StepReserving: React.FC<{
   onBack?: () => void;
 }> = ({isConfirming, error, onRetry, onBack}) => (
   <motion.div
-    initial={{opacity: 0, y: 20}}
-    animate={{opacity: 1, y: 0}}
-    exit={{opacity: 0, y: -20}}
+    initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
     className="glass-panel p-8 rounded-3xl border border-[#1E1E1E]/15 shadow-soft-editorial bg-white/60 text-center"
   >
     {!error ? (
@@ -590,18 +823,12 @@ const StepReserving: React.FC<{
         </div>
         <div className="flex gap-3">
           {onBack && (
-            <button
-              onClick={onBack}
-              className="flex-1 py-3 rounded-full border border-[#1E1E1E]/20 text-[#1E1E1E] text-[11px] font-bold uppercase tracking-[0.15em] hover:border-[#E1BAC2] transition-all"
-            >
+            <button onClick={onBack} className="flex-1 py-3 rounded-full border border-[#1E1E1E]/20 text-[#1E1E1E] text-[11px] font-bold uppercase tracking-[0.15em] hover:border-[#E1BAC2] transition-all">
               Go Back
             </button>
           )}
           {onRetry && (
-            <button
-              onClick={onRetry}
-              className="flex-1 py-3 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.15em] hover:bg-[#000000] transition-all shadow-md"
-            >
+            <button onClick={onRetry} className="flex-1 py-3 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.15em] hover:bg-[#000000] transition-all shadow-md">
               Try Again
             </button>
           )}
@@ -611,7 +838,7 @@ const StepReserving: React.FC<{
   </motion.div>
 );
 
-// Step: Awaiting Deposit
+// ─── FAsset Step: Awaiting Deposit ──────────────────────────────────────────
 const StepAwaitingDeposit: React.FC<{
   tag: string;
   asset: 'XRP' | 'BTC';
@@ -623,9 +850,7 @@ const StepAwaitingDeposit: React.FC<{
   copied: boolean;
 }> = ({tag, asset, coreVaultAddress, isVaultLoading, onCopyTag, onCopyVaultAddress, vaultCopied, copied}) => (
   <motion.div
-    initial={{opacity: 0, y: 20}}
-    animate={{opacity: 1, y: 0}}
-    exit={{opacity: 0, y: -20}}
+    initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
     className="glass-panel p-6 sm:p-8 rounded-3xl border border-[#1E1E1E]/15 shadow-soft-editorial bg-white/60"
   >
     <div className="text-center mb-8">
@@ -640,19 +865,16 @@ const StepAwaitingDeposit: React.FC<{
       </p>
     </div>
 
-    {/* Tag Display */}
     <div className="p-5 rounded-2xl bg-[#1E1E1E] text-[#F5F5F3] mb-6">
       <p className="text-[10px] font-mono text-[#E1BAC2] uppercase tracking-wider mb-2">Your Minting Tag</p>
       <div className="flex items-center justify-between">
         <span className="text-2xl font-mono font-bold">{tag}</span>
-        <button
-          onClick={onCopyTag}
-          className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors"
-        >
+        <button onClick={onCopyTag} className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors">
           {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
         </button>
       </div>
-    </div>      {/* Instructions */}
+    </div>
+
     <div className="space-y-3 mb-6">
       <div className="flex items-start gap-3 p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
         <span className="w-5 h-5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center text-[10px] font-bold shrink-0">1</span>
@@ -662,14 +884,10 @@ const StepAwaitingDeposit: React.FC<{
         <span className="w-5 h-5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center text-[10px] font-bold shrink-0">2</span>
         <div className="flex-1">
           <p className="text-xs text-[#1E1E1E]">Send {asset} to the FAsset Core Vault with destination tag: <strong>{tag}</strong></p>
-          {/* Core Vault Address Display */}
           <div className="mt-2 p-3 rounded-xl bg-[#1E1E1E] text-[#F5F5F3]">
             <div className="flex items-center justify-between mb-1">
               <p className="text-[10px] font-mono text-[#E1BAC2] uppercase tracking-wider">Core Vault Address ({asset === 'XRP' ? 'XRPL' : 'BTC'})</p>
-              <button
-                onClick={onCopyVaultAddress}
-                className="p-1 rounded-md bg-white/10 hover:bg-white/20 transition-colors"
-              >
+              <button onClick={onCopyVaultAddress} className="p-1 rounded-md bg-white/10 hover:bg-white/20 transition-colors">
                 {vaultCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
               </button>
             </div>
@@ -679,13 +897,9 @@ const StepAwaitingDeposit: React.FC<{
                 <span className="text-[10px] font-mono text-white/50">Fetching from AssetManager...</span>
               </div>
             ) : coreVaultAddress ? (
-              <p className="text-[11px] font-mono font-bold break-all leading-relaxed">
-                {coreVaultAddress}
-              </p>
+              <p className="text-[11px] font-mono font-bold break-all leading-relaxed">{coreVaultAddress}</p>
             ) : (
-              <p className="text-[10px] font-mono text-red-400">
-                Unable to fetch address — check Flare AssetManager
-              </p>
+              <p className="text-[10px] font-mono text-red-400">Unable to fetch address — check Flare AssetManager</p>
             )}
           </div>
           <p className="text-[10px] text-[#4A4A4A] mt-1.5">
@@ -706,7 +920,7 @@ const StepAwaitingDeposit: React.FC<{
   </motion.div>
 );
 
-// Step: Ready to Settle
+// ─── FAsset Step: Ready to Settle ───────────────────────────────────────────
 const StepReadyToSettle: React.FC<{
   depositId: string;
   xrplTxHash: string | null;
@@ -719,9 +933,7 @@ const StepReadyToSettle: React.FC<{
 
   return (
     <motion.div
-      initial={{opacity: 0, y: 20}}
-      animate={{opacity: 1, y: 0}}
-      exit={{opacity: 0, y: -20}}
+      initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
       className="glass-panel p-6 sm:p-8 rounded-3xl border border-emerald-500/30 shadow-soft-editorial bg-white/60"
     >
       <div className="text-center mb-8">
@@ -736,7 +948,6 @@ const StepReadyToSettle: React.FC<{
         </p>
       </div>
 
-      {/* Deposit Details */}
       <div className="p-4 rounded-2xl bg-[#F5F5F3] border border-[#1E1E1E]/10 mb-6 space-y-3">
         {xrplAmount && (
           <div className="flex items-center justify-between text-xs">
@@ -751,12 +962,7 @@ const StepReadyToSettle: React.FC<{
         {xrplExplorerUrl && (
           <div className="flex items-center justify-between text-xs">
             <span className="text-[#4A4A4A]">XRPL Transaction</span>
-            <a
-              href={xrplExplorerUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="font-mono text-emerald-700 hover:text-emerald-900 underline underline-offset-2 transition-colors"
-            >
+            <a href={xrplExplorerUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-emerald-700 hover:text-emerald-900 underline underline-offset-2 transition-colors">
               {xrplTxHash!.slice(0, 8)}...{xrplTxHash!.slice(-6)} ↗
             </a>
           </div>
@@ -764,32 +970,23 @@ const StepReadyToSettle: React.FC<{
       </div>
 
       <button
-        onClick={onSettle}
-        disabled={isSettling}
+        onClick={onSettle} disabled={isSettling}
         className="w-full py-3.5 rounded-full bg-emerald-600 text-white text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-emerald-700 transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
       >
         {isSettling ? (
-          <>
-            <RefreshCw className="w-4 h-4 animate-spin" />
-            <span>Settling Deposit...</span>
-          </>
+          <><RefreshCw className="w-4 h-4 animate-spin" /><span>Settling Deposit...</span></>
         ) : (
-          <>
-            <span>Settle & Receive Shares</span>
-            <ArrowRight className="w-4 h-4" />
-          </>
+          <><span>Settle & Receive Shares</span><ArrowRight className="w-4 h-4" /></>
         )}
       </button>
     </motion.div>
   );
 };
 
-// Step: Settling
+// ─── FAsset Step: Settling ──────────────────────────────────────────────────
 const StepSettling: React.FC = () => (
   <motion.div
-    initial={{opacity: 0, y: 20}}
-    animate={{opacity: 1, y: 0}}
-    exit={{opacity: 0, y: -20}}
+    initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
     className="glass-panel p-8 rounded-3xl border border-[#1E1E1E]/15 shadow-soft-editorial bg-white/60 text-center"
   >
     <div className="w-16 h-16 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center mx-auto mb-4 animate-spin">
@@ -804,7 +1001,7 @@ const StepSettling: React.FC = () => (
   </motion.div>
 );
 
-// Step: Complete
+// ─── FAsset Step: Complete ──────────────────────────────────────────────────
 const StepComplete: React.FC<{
   asset: 'XRP' | 'BTC';
   onReset: () => void;
@@ -812,9 +1009,7 @@ const StepComplete: React.FC<{
   onNewDeposit: () => void;
 }> = ({asset, onReset, onBack, onNewDeposit}) => (
   <motion.div
-    initial={{opacity: 0, y: 20}}
-    animate={{opacity: 1, y: 0}}
-    exit={{opacity: 0, y: -20}}
+    initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
     className="glass-panel p-6 sm:p-8 rounded-3xl border border-emerald-500/30 shadow-soft-editorial bg-white/60"
   >
     <div className="text-center mb-8">
@@ -841,23 +1036,315 @@ const StepComplete: React.FC<{
     </div>
 
     <div className="grid grid-cols-2 gap-3">
-      <button
-        onClick={onNewDeposit}
-        className="py-3 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.15em] hover:bg-[#000000] transition-all"
-      >
+      <button onClick={onNewDeposit} className="py-3 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.15em] hover:bg-[#000000] transition-all">
         Deposit Again (Same Tag)
       </button>
-      <button
-        onClick={onBack}
-        className="py-3 rounded-full border border-[#1E1E1E]/20 text-[#1E1E1E] text-[11px] font-bold uppercase tracking-[0.15em] hover:border-[#E1BAC2] transition-all"
-      >
+      <button onClick={onBack} className="py-3 rounded-full border border-[#1E1E1E]/20 text-[#1E1E1E] text-[11px] font-bold uppercase tracking-[0.15em] hover:border-[#E1BAC2] transition-all">
         View Dashboard
       </button>
     </div>
   </motion.div>
 );
 
-// Asset Option Card
+// ═══════════════════════════════════════════════════════════════════════════
+// CDP ERC-4626 Flow Components
+// ═══════════════════════════════════════════════════════════════════════════
+
+// ─── CDP Step: Select Amount & Deposit ──────────────────────────────────────
+const StepCdpSelect: React.FC<{
+  cdpBalance: bigint | undefined;
+  cdpDecimals: number;
+  cdpAmount: string;
+  setCdpAmount: (v: string) => void;
+  maxDeposit: bigint | undefined;
+  vaultTotalAssets: bigint | undefined;
+  previewShares: bigint | undefined;
+  needsApproval: boolean;
+  onApprove: () => void;
+  onDeposit: () => void;
+  isProcessing: boolean;
+  approved?: boolean;
+  parsedCdpAmount?: bigint;
+}> = ({cdpBalance, cdpDecimals, cdpAmount, setCdpAmount, maxDeposit, vaultTotalAssets, previewShares, needsApproval, onApprove, onDeposit, isProcessing, approved, parsedCdpAmount: parsedAmount}) => {
+  const formattedBalance = cdpBalance !== undefined ? formatUnits(cdpBalance, cdpDecimals) : '—';
+  const formattedMaxDeposit = maxDeposit !== undefined
+    ? maxDeposit > 10n ** 27n ? 'Unlimited' : formatUnits(maxDeposit, cdpDecimals)
+    : '—';
+  const formattedVaultTvl = vaultTotalAssets !== undefined ? formatUnits(vaultTotalAssets, cdpDecimals) : '—';
+  const formattedShares = previewShares !== undefined ? formatUnits(previewShares, cdpDecimals) : '—';
+  const hasBalance = cdpBalance !== undefined && cdpBalance > 0n;
+  const hasAmount = cdpAmount && parseFloat(cdpAmount) > 0;
+  const exceedsBalance = cdpBalance !== undefined && parsedAmount !== undefined && parsedAmount > 0n && parsedAmount > cdpBalance;
+  const isValidAmount = hasAmount && !exceedsBalance && hasBalance;
+
+  const handleMaxClick = () => {
+    if (cdpBalance !== undefined) {
+      setCdpAmount(formatUnits(cdpBalance, cdpDecimals));
+    }
+  };
+
+  return (
+    <motion.div
+      initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
+      className="glass-panel p-6 sm:p-8 rounded-3xl border border-[#1E1E1E]/15 shadow-soft-editorial bg-white/60"
+    >
+      <h3 className="text-lg font-bold text-[#1E1E1E] mb-1" style={{fontFamily: 'Manrope, sans-serif'}}>
+        {approved ? 'Confirm deposit' : 'Deposit CDP into vault'}
+      </h3>
+      <p className="text-xs text-[#4A4A4A] mb-6">
+        {approved
+          ? 'Your CDP is approved. Review and confirm the deposit.'
+          : "Enter the amount of CDP you want to deposit. You'll approve the vault, then deposit in one flow."}
+      </p>
+
+      {/* Vault Info Card */}
+      <div className="p-4 rounded-2xl bg-[#1E1E1E] text-[#F5F5F3] mb-6">
+        <div className="flex items-center gap-3 mb-3">
+          <div className="w-10 h-10 rounded-full bg-[#E1BAC2]/20 flex items-center justify-center">
+            <Coins className="w-5 h-5 text-[#E1BAC2]" />
+          </div>
+          <div>
+            <p className="text-sm font-bold" style={{fontFamily: 'Manrope, sans-serif'}}>CDP Vault (fyCDP)</p>
+            <p className="text-[10px] font-mono text-[#E1BAC2]">ERC-4626 · Enosys V3 LP</p>
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3 text-xs">
+          <div>
+            <p className="text-[10px] font-mono text-white/40 uppercase tracking-wider">Vault TVL</p>
+            <p className="font-bold">{formattedVaultTvl} CDP</p>
+          </div>
+          <div>
+            <p className="text-[10px] font-mono text-white/40 uppercase tracking-wider">Max Deposit</p>
+            <p className="font-bold">{formattedMaxDeposit} CDP</p>
+          </div>
+        </div>
+      </div>
+
+      {/* Balance Display */}
+      <div className="flex items-center justify-between text-xs mb-2">
+        <span className="text-[#4A4A4A]">Your CDP Balance</span>
+        <span className="font-mono font-bold text-[#1E1E1E]">{formattedBalance} CDP</span>
+      </div>
+      {!hasBalance && cdpBalance !== undefined && (
+        <div className="p-3 rounded-xl bg-amber-50 border border-amber-200 mb-4">
+          <p className="text-xs text-amber-700">
+            You don't have any CDP tokens yet. Mint CDP on Enosys Loans using FXRP collateral, or acquire it from a DEX.
+          </p>
+        </div>
+      )}
+
+      {/* Amount Input */}
+      <div className="mb-4">
+        <div className="flex items-center justify-between text-xs font-mono font-bold text-[#1E1E1E] mb-2">
+          <span>Deposit Amount</span>
+          <span className="text-[#4A4A4A]">CDP</span>
+        </div>
+        <div className="relative">
+          <input
+            type="number"
+            value={cdpAmount}
+            onChange={(e) => setCdpAmount(e.target.value)}
+            disabled={approved}
+            className="w-full bg-white border border-[#1E1E1E]/20 rounded-2xl px-4 py-3 text-lg font-bold text-[#1E1E1E] focus:outline-none focus:border-[#E1BAC2] disabled:opacity-60 disabled:cursor-not-allowed"
+            placeholder="0.00"
+            style={{fontFamily: 'Manrope, sans-serif'}}
+            min="0"
+            step="any"
+          />
+          <button
+            onClick={handleMaxClick}
+            disabled={approved}
+            className="absolute right-3 top-3 px-2.5 py-1 rounded-full bg-[#E1BAC2]/20 text-[#8B6F75] text-[10px] font-mono font-bold hover:bg-[#E1BAC2]/40 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            MAX
+          </button>
+        </div>
+        {exceedsBalance && (
+          <p className="text-[10px] text-red-600 mt-1 font-bold">Amount exceeds your CDP balance</p>
+        )}
+      </div>
+
+      {/* Preview: Shares to receive */}
+      {hasAmount && isValidAmount && previewShares !== undefined && (
+        <div className="p-4 rounded-2xl bg-[#F5F5F3] border border-[#1E1E1E]/10 mb-6 space-y-2">
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[#4A4A4A]">CDP Deposited</span>
+            <span className="font-mono font-bold text-[#1E1E1E]">{cdpAmount} CDP</span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[#4A4A4A]">fyCDP Shares You'll Receive</span>
+            <span className="font-mono font-bold text-[#E1BAC2]">{parseFloat(formattedShares).toFixed(6)} fyCDP</span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[#4A4A4A]">Yield Source</span>
+            <span className="font-mono text-[#4A4A4A]">Enosys V3 CDP/WC2FLR LP</span>
+          </div>
+          <div className="flex items-center justify-between text-xs">
+            <span className="text-[#4A4A4A]">Projected APY</span>
+            <span className="font-mono font-bold text-emerald-600">~8-20%</span>
+          </div>
+        </div>
+      )}
+
+      {/* Approval Status */}
+      {!needsApproval && approved && hasAmount && (
+        <div className="flex items-center gap-2 p-3 rounded-xl bg-emerald-50 border border-emerald-200 mb-4">
+          <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+          <p className="text-xs text-emerald-700 font-bold">CDP approved — ready to deposit</p>
+        </div>
+      )}
+
+      {/* Action Button */}
+      {needsApproval ? (
+        <button
+          onClick={onApprove}
+          disabled={!isValidAmount || isProcessing}
+          className="w-full py-3.5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-[#000000] transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+        >
+          <ShieldCheck className="w-4 h-4 text-[#E1BAC2]" />
+          <span>Approve CDP Spend</span>
+          <ArrowRight className="w-4 h-4" />
+        </button>
+      ) : (
+        <button
+          onClick={onDeposit}
+          disabled={!isValidAmount || isProcessing}
+          className="w-full py-3.5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-[#000000] transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+        >
+          <Coins className="w-4 h-4 text-[#E1BAC2]" />
+          <span>Deposit {cdpAmount || '0'} CDP → fyCDP</span>
+          <ArrowRight className="w-4 h-4" />
+        </button>
+      )}
+    </motion.div>
+  );
+};
+
+// ─── CDP Generic: Transaction Pending ───────────────────────────────────────
+const StepTxPending: React.FC<{
+  title: string;
+  description: string;
+  isConfirming: boolean;
+  error?: string | null;
+  onRetry?: () => void;
+  onBack?: () => void;
+}> = ({title, description, isConfirming, error, onRetry, onBack}) => (
+  <motion.div
+    initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
+    className="glass-panel p-8 rounded-3xl border border-[#1E1E1E]/15 shadow-soft-editorial bg-white/60 text-center"
+  >
+    {!error ? (
+      <>
+        <div className="w-16 h-16 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center mx-auto mb-4 animate-spin">
+          <RefreshCw className="w-8 h-8 text-[#E1BAC2]" />
+        </div>
+        <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
+          {isConfirming ? 'Confirming...' : title}
+        </h3>
+        <p className="text-xs text-[#4A4A4A] mb-4">
+          {isConfirming ? 'Transaction submitted. Waiting for on-chain confirmation...' : description}
+        </p>
+      </>
+    ) : (
+      <>
+        <div className="w-16 h-16 rounded-full bg-red-50 border border-red-200 flex items-center justify-center mx-auto mb-4">
+          <AlertCircle className="w-8 h-8 text-red-500" />
+        </div>
+        <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
+          Transaction Failed
+        </h3>
+        <p className="text-xs text-[#4A4A4A] mb-4">
+          The transaction failed. This could be due to insufficient balance, a network issue, or a contract error.
+        </p>
+        <div className="p-3 rounded-xl bg-red-50 border border-red-200 mb-6">
+          <p className="text-xs text-red-700 font-mono break-all">{error}</p>
+        </div>
+        <div className="flex gap-3">
+          {onBack && (
+            <button onClick={onBack} className="flex-1 py-3 rounded-full border border-[#1E1E1E]/20 text-[#1E1E1E] text-[11px] font-bold uppercase tracking-[0.15em] hover:border-[#E1BAC2] transition-all">
+              Go Back
+            </button>
+          )}
+          {onRetry && (
+            <button onClick={onRetry} className="flex-1 py-3 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.15em] hover:bg-[#000000] transition-all shadow-md">
+              Try Again
+            </button>
+          )}
+        </div>
+      </>
+    )}
+  </motion.div>
+);
+
+// ─── CDP Step: Complete ─────────────────────────────────────────────────────
+const StepCdpComplete: React.FC<{
+  amount: string;
+  previewShares: bigint | undefined;
+  txHash: `0x${string}` | undefined;
+  onReset: () => void;
+  onBack: () => void;
+  onNewDeposit: () => void;
+}> = ({amount, previewShares, txHash, onReset, onBack, onNewDeposit}) => {
+  const explorerUrl = txHash ? `https://coston2-explorer.flare.network/tx/${txHash}` : null;
+  const formattedShares = previewShares ? formatUnits(previewShares, 18) : '—';
+
+  return (
+    <motion.div
+      initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
+      className="glass-panel p-6 sm:p-8 rounded-3xl border border-emerald-500/30 shadow-soft-editorial bg-white/60"
+    >
+      <div className="text-center mb-8">
+        <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
+          <Check className="w-8 h-8 text-emerald-600" />
+        </div>
+        <h3 className="text-2xl font-extrabold text-[#1E1E1E] mb-1" style={{fontFamily: 'Manrope, sans-serif'}}>
+          CDP Deposit Complete!
+        </h3>
+        <p className="text-xs text-emerald-700 font-mono font-bold">
+          Your fyCDP tokens are now earning yield from Enosys V3 CDP/WC2FLR LP.
+        </p>
+      </div>
+
+      <div className="p-4 rounded-2xl bg-white/70 border border-[#1E1E1E]/15 mb-6 text-xs space-y-2">
+        <div className="flex justify-between">
+          <span className="text-[#4A4A4A]">Deposited:</span>
+          <span className="font-bold text-[#1E1E1E]">{amount} CDP</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-[#4A4A4A]">Vault Shares:</span>
+          <span className="font-bold text-[#E1BAC2]">{parseFloat(formattedShares).toFixed(6)} fyCDP</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-[#4A4A4A]">Vault:</span>
+          <span className="font-bold text-[#1E1E1E]">CDP Vault (Enosys V3 LP)</span>
+        </div>
+        <div className="flex justify-between">
+          <span className="text-[#4A4A4A]">Network:</span>
+          <span className="font-mono text-emerald-700 font-bold">Flare Coston2 Testnet</span>
+        </div>
+        {explorerUrl && (
+          <div className="flex justify-between">
+            <span className="text-[#4A4A4A]">Tx:</span>
+            <a href={explorerUrl} target="_blank" rel="noopener noreferrer" className="font-mono text-emerald-700 hover:text-emerald-900 underline underline-offset-2 transition-colors">
+              {txHash!.slice(0, 8)}...{txHash!.slice(-6)} ↗
+            </a>
+          </div>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3">
+        <button onClick={onNewDeposit} className="py-3 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.15em] hover:bg-[#000000] transition-all">
+          Deposit More
+        </button>
+        <button onClick={onBack} className="py-3 rounded-full border border-[#1E1E1E]/20 text-[#1E1E1E] text-[11px] font-bold uppercase tracking-[0.15em] hover:border-[#E1BAC2] transition-all">
+          View Dashboard
+        </button>
+      </div>
+    </motion.div>
+  );
+};
+
+// ─── Asset Option Card ──────────────────────────────────────────────────────
 const AssetOption: React.FC<{
   name: string;
   img: string;

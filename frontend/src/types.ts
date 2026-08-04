@@ -5,8 +5,8 @@
 export interface VaultInfo {
   id: string;
   name: string;
-  assetSymbol: 'FXRP' | 'USDC.e';
-  strategyType: 'Kinetic Lending' | 'Enosys DEX LP' | 'FTSO Delegation' | 'SparkDEX LP' | 'Direct Mint' | 'Enosys DEX FXRP';
+  assetSymbol: 'FXRP' | 'USDC.e' | 'CDP';
+  strategyType: 'Kinetic Lending' | 'Enosys DEX LP' | 'FTSO Delegation' | 'SparkDEX LP' | 'Direct Mint' | 'Enosys DEX FXRP' | 'Enosys CDP LP';
   projectedApy: string;
   status: 'Testnet' | 'Mainnet' | 'Deployed' | 'Coming Soon';
   primaryProtocol: string;
@@ -37,7 +37,7 @@ export interface ScrollBreakpoint {
 }
 
 export interface DepositSimulation {
-  asset: 'XRP' | 'BTC';
+  asset: 'XRP' | 'BTC' | 'CDP';
   amount: number;
   durationMonths: number;
   projectedApy: number;
