@@ -1,7 +1,10 @@
 /**
  * FlareYield Smart Contract Addresses
  * 
- * Loaded from environment variables (.env file)
+ * Multi-Vault Architecture:
+ * - FXRP Vault: For XRP holders wanting growth + yield
+ * - CDP Vault: For stablecoin holders wanting stable yield
+ * 
  * Deployed on Flare Coston2 Testnet
  * Chain ID: 114
  */
@@ -9,19 +12,52 @@
 export const COSTON2_CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID) || 114;
 
 /**
- * Core FlareYield Protocol Contracts
+ * Core FlareYield Protocol Contracts - Multi-Vault Architecture
  */
 export const CONTRACTS = {
-  // ParentVault - ERC-4626 vault (proxy)
+  // === FXRP Vault (Growth-Oriented) ===
+  vaults: {
+    // ParentVault_FXRP - ERC-4626 vault (proxy) for FXRP
+    fxrpVault: import.meta.env.VITE_FXRP_VAULT_ADDRESS || '0x01f64160E4928Eba5607aE294F9B66090Dc323B3',
+    
+    // ParentVault_CDP - ERC-4626 vault (proxy) for CDP stablecoin
+    cdpVault: import.meta.env.VITE_CDP_VAULT_ADDRESS || '0x71cF7B0f792400a2533e917bcfB3892b34b569e8',
+  },
+  
+  // === Strategy Adapters ===
+  strategies: {
+    // FXRP Vault Strategies
+    ftsoV2Delegation: import.meta.env.VITE_FTSO_ADAPTER_ADDRESS || '0xa0811A54F72Fd3e7b0F30d75227741feFE2755fB',
+    sparkDexLp: import.meta.env.VITE_SPARKDEX_ADAPTER_ADDRESS || '0xA88327A42267C0dE171CBECA1b016dEF2e990612',
+    
+    // CDP Vault Strategies
+    enosysCdpLp: import.meta.env.VITE_ENOSYS_CDP_ADAPTER_ADDRESS || '0x276BBc877C3d50e50848E7ca8c68241D959F4800',
+  },
+  
+  // === Legacy / Backward Compatibility ===
+  // @deprecated Use vaults.fxrpVault instead
   parentVault: import.meta.env.VITE_PARENT_VAULT_ADDRESS || '0x01f64160E4928Eba5607aE294F9B66090Dc323B3',
   
-  // FAssetAdapter - Direct minting integration (with IERC721Receiver fix)
+  // FAssetAdapter - Direct minting integration
   fAssetAdapter: import.meta.env.VITE_FASSET_ADAPTER_ADDRESS || '0x02D4F85301A2d1b3Bcc40BfD7937e6Fb2F5224a7',
   
-  // FXRP Token (Flare-wrapped XRP)
+  // === Underlying Assets ===
+  tokens: {
+    // FXRP Token (Flare-wrapped XRP)
+    fxrp: import.meta.env.VITE_FXRP_ADDRESS || '0x0b6A3645c240605887a5532109323A3E12273dc7',
+    
+    // CDP Token (Enosys CDP Dollar - XRP-backed stablecoin)
+    cdp: import.meta.env.VITE_CDP_ADDRESS || '0x41D503D78D319D685fb9311363732009f7224059',
+    
+    // WC2FLR / WNat (Wrapped Flare)
+    wc2flr: import.meta.env.VITE_WC2FLR_ADDRESS || '0xC67DCE33D7A8efA5FfEB961899C73fe01bCe9273',
+  },
+  
+  // === Legacy Token References ===
+  // @deprecated Use tokens.fxrp instead
   fxrp: import.meta.env.VITE_FXRP_ADDRESS || '0x0b6A3645c240605887a5532109323A3E12273dc7',
   
-  // Flare FAsset Infrastructure
+  // === Flare FAsset Infrastructure ===
   assetManagerFXRP: import.meta.env.VITE_ASSET_MANAGER_FXRP_ADDRESS || '0xc1Ca88b937d0b528842F95d5731ffB586f4fbDFA',
   mintingTagManager: import.meta.env.VITE_MINTING_TAG_MANAGER_ADDRESS || '0x094511737909b626391106bBc21B25feb2D67B96',
 } as const;
@@ -147,9 +183,74 @@ export const isCoston2 = (chainId: number | undefined) => {
  * Human-readable contract names
  */
 export const CONTRACT_NAMES = {
-  [CONTRACTS.parentVault]: 'FlareYield Vault',
+  // Vaults
+  [CONTRACTS.vaults.fxrpVault]: 'FlareYield FXRP Vault',
+  [CONTRACTS.vaults.cdpVault]: 'FlareYield CDP Vault',
+  
+  // Strategies
+  [CONTRACTS.strategies.ftsoV2Delegation]: 'FTSO v2 Delegation Strategy',
+  [CONTRACTS.strategies.sparkDexLp]: 'SparkDEX LP Strategy',
+  [CONTRACTS.strategies.enosysCdpLp]: 'Enosys V3 CDP LP Strategy',
+  
+  // Legacy
+  [CONTRACTS.parentVault]: 'FlareYield Vault (Legacy)',
   [CONTRACTS.fAssetAdapter]: 'FAsset Adapter',
-  [CONTRACTS.fxrp]: 'FXRP Token',
+  
+  // Tokens
+  [CONTRACTS.tokens.fxrp]: 'FXRP Token',
+  [CONTRACTS.tokens.cdp]: 'CDP Dollar',
+  [CONTRACTS.tokens.wc2flr]: 'Wrapped C2FLR',
+  [CONTRACTS.fxrp]: 'FXRP Token (Legacy)',
+  
+  // Infrastructure
   [CONTRACTS.assetManagerFXRP]: 'Asset Manager FXRP',
   [CONTRACTS.mintingTagManager]: 'Minting Tag Manager',
+} as const;
+
+/**
+ * Vault Metadata for UI
+ */
+export const VAULT_METADATA = {
+  fxrp: {
+    address: CONTRACTS.vaults.fxrpVault,
+    name: 'FXRP Vault',
+    symbol: 'fyFXRP',
+    description: 'Growth-oriented vault for XRP holders. Earn yield without selling your XRP.',
+    underlyingAsset: CONTRACTS.tokens.fxrp,
+    underlyingSymbol: 'FXRP',
+    strategies: [
+      {
+        address: CONTRACTS.strategies.ftsoV2Delegation,
+        name: 'FTSO Delegation',
+        apyRange: '3-8%',
+        riskLevel: 'Low',
+      },
+      {
+        address: CONTRACTS.strategies.sparkDexLp,
+        name: 'SparkDEX LP',
+        apyRange: '5-15%',
+        riskLevel: 'Medium',
+      },
+    ],
+    riskProfile: 'Medium' as const,
+    targetApy: '5-12%',
+  },
+  cdp: {
+    address: CONTRACTS.vaults.cdpVault,
+    name: 'CDP Vault',
+    symbol: 'fyCDP',
+    description: 'Stable yield vault for CDP stablecoin holders. Predictable returns with lower volatility.',
+    underlyingAsset: CONTRACTS.tokens.cdp,
+    underlyingSymbol: 'CDP',
+    strategies: [
+      {
+        address: CONTRACTS.strategies.enosysCdpLp,
+        name: 'Enosys V3 LP',
+        apyRange: '8-20%',
+        riskLevel: 'Low-Medium',
+      },
+    ],
+    riskProfile: 'Low' as const,
+    targetApy: '8-20%',
+  },
 } as const;
