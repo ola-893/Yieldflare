@@ -54,27 +54,36 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const [xrplTxHash, setXrplTxHash] = useState<string | null>(null);
   const [xrplAmount, setXrplAmount] = useState<string | null>(null);
 
-  // Persist state across refreshes — if user has a registered tag, go straight to Awaiting
+  // Always start at SELECT phase — but remember any previously saved tag.
+  // On reserve click, we check both localStorage and on-chain for existing tags.
+  const [savedTag, setSavedTag] = useState<string | null>(null);
+
   useEffect(() => {
     const saved = localStorage.getItem('flux-deposit-state');
     if (saved) {
       try {
         const parsed = JSON.parse(saved);
-        if (parsed.step && parsed.tag) {
-          setReservedTag(parsed.tag);
-          setAsset(parsed.asset || 'XRP');
-          // If previous deposit is complete or settled, start a new deposit with same tag
-          if (parsed.step === 'COMPLETE' || parsed.step === 'SETTLING') {
-            setStep('AWAITING_DEPOSIT');
-            setDepositId(null);
-          } else {
-            setStep(parsed.step);
-            setDepositId(parsed.depositId || null);
-          }
+        if (parsed.tag) {
+          setSavedTag(parsed.tag);
+          console.log('[Deposit] Found saved tag in localStorage:', parsed.tag);
         }
       } catch { /* ignore */ }
     }
   }, []);
+
+  // Check on-chain for existing reserved tags for this user (may not include FAssetAdapter tags)
+  const {data: userReservedTags, isLoading: isTagsLoading} = useReadContract({
+    address: CONTRACTS.mintingTagManager,
+    abi: MINTING_TAG_MANAGER_ABI,
+    functionName: 'reservedTagsForOwner',
+    args: address ? [address] : undefined,
+    query: {
+      enabled: !!address,
+    },
+  });
+  const existingTags = (userReservedTags as bigint[] | undefined) ?? [];
+  // User has an existing tag if found on-chain OR in localStorage
+  const hasExistingTag = existingTags.length > 0 || !!savedTag;
 
   const saveState = (s: DepositStep, tag?: string, depId?: string) => {
     localStorage.setItem('flux-deposit-state', JSON.stringify({
@@ -182,6 +191,24 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   }, [settleHash, isSettleConfirming]);
 
   const handleReserveTag = () => {
+    // Check on-chain first, then localStorage for an existing tag
+    if (existingTags.length > 0) {
+      const existingTag = existingTags[0].toString();
+      console.log('[Deposit] Found on-chain tag:', existingTag, '— skipping to AWAITING_DEPOSIT');
+      setReservedTag(existingTag);
+      saveState('AWAITING_DEPOSIT', existingTag);
+      setStep('AWAITING_DEPOSIT');
+      return;
+    }
+    if (savedTag) {
+      console.log('[Deposit] Found saved tag:', savedTag, '— skipping to AWAITING_DEPOSIT');
+      setReservedTag(savedTag);
+      saveState('AWAITING_DEPOSIT', savedTag);
+      setStep('AWAITING_DEPOSIT');
+      return;
+    }
+
+    // No existing tag found — register a new one
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     registerTag({
       address: CONTRACTS.fAssetAdapter,
@@ -318,6 +345,8 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
               feeError={!!feeError}
               reservationFee={reservationFee}
               hasEnoughBalance={hasEnoughBalance}
+              isTagsLoading={isTagsLoading}
+              hasExistingTag={hasExistingTag}
             />
           )}
 
@@ -420,7 +449,9 @@ const StepSelectAsset: React.FC<{
   feeError: boolean;
   reservationFee: bigint;
   hasEnoughBalance: boolean;
-}> = ({asset, setAsset, onReserve, isRegistering, isFeeLoading, feeError, reservationFee, hasEnoughBalance}) => (
+  isTagsLoading: boolean;
+  hasExistingTag: boolean;
+}> = ({asset, setAsset, onReserve, isRegistering, isFeeLoading, feeError, reservationFee, hasEnoughBalance, isTagsLoading, hasExistingTag}) => (
   <motion.div
     initial={{opacity: 0, y: 20}}
     animate={{opacity: 1, y: 0}}
@@ -432,7 +463,7 @@ const StepSelectAsset: React.FC<{
     </h3>
     <p className="text-xs text-[#4A4A4A] mb-6">Choose the native asset you want to deposit</p>
 
-    <div className="grid grid-cols-2 gap-4 mb-8">
+    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8">
       <AssetOption
         name="XRP"
         img={xrpImg}
@@ -446,6 +477,15 @@ const StepSelectAsset: React.FC<{
         description="Routed to Enosys DEX via FBTC"
         isSelected={asset === 'BTC'}
         onClick={() => setAsset('BTC')}
+        comingSoon={true}
+      />
+      <AssetOption
+        name="Enosys Loans (CDP)"
+        img={xrpImg}
+        description="CDP Vault for stable yield"
+        isSelected={false}
+        onClick={() => {}}
+        comingSoon={true}
       />
     </div>      <div className="p-4 rounded-2xl bg-[#F5F5F3] border border-[#1E1E1E]/10 mb-6">
       <div className="flex items-start gap-2">
@@ -474,9 +514,17 @@ const StepSelectAsset: React.FC<{
       </div>
     )}
 
+    {hasExistingTag && (
+      <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 mb-6">
+        <p className="text-xs text-emerald-700">
+          <strong>Welcome back!</strong> You already have a reserved minting tag. Click below to go directly to your deposit instructions.
+        </p>
+      </div>
+    )}
+
     <button
       onClick={onReserve}
-      disabled={isRegistering || (!isFeeLoading && !hasEnoughBalance && reservationFee > 0n)}
+      disabled={isRegistering || isTagsLoading || (!isFeeLoading && !hasEnoughBalance && reservationFee > 0n)}
       className="w-full py-3.5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-[#000000] transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
     >
       {isRegistering ? (
@@ -484,14 +532,14 @@ const StepSelectAsset: React.FC<{
           <RefreshCw className="w-4 h-4 animate-spin" />
           <span>Confirm in Wallet...</span>
         </>
-      ) : isFeeLoading ? (
+      ) : isFeeLoading || isTagsLoading ? (
         <>
           <RefreshCw className="w-4 h-4 animate-spin" />
           <span>Loading...</span>
         </>
       ) : (
         <>
-          <span>Reserve Minting Tag</span>
+          <span>{hasExistingTag ? 'Continue to Deposit' : 'Reserve Minting Tag'}</span>
           <ArrowRight className="w-4 h-4" />
         </>
       )}
@@ -816,19 +864,28 @@ const AssetOption: React.FC<{
   description: string;
   isSelected: boolean;
   onClick: () => void;
-}> = ({name, img, description, isSelected, onClick}) => (
+  comingSoon?: boolean;
+}> = ({name, img, description, isSelected, onClick, comingSoon}) => (
   <button
-    onClick={onClick}
+    onClick={comingSoon ? undefined : onClick}
+    disabled={comingSoon}
     className={`p-5 rounded-2xl border-2 transition-all text-left ${
-      isSelected
-        ? 'border-[#1E1E1E] bg-white shadow-md'
-        : 'border-[#1E1E1E]/10 bg-white/40 hover:border-[#1E1E1E]/30'
+      comingSoon
+        ? 'border-[#1E1E1E]/10 bg-[#F5F5F3]/60 opacity-70 cursor-not-allowed'
+        : isSelected
+          ? 'border-[#1E1E1E] bg-white shadow-md'
+          : 'border-[#1E1E1E]/10 bg-white/40 hover:border-[#1E1E1E]/30'
     }`}
   >
     <div className="flex items-center gap-3 mb-2">
       <img src={img} alt={name} className="w-8 h-8 object-contain" />
       <span className="text-base font-bold text-[#1E1E1E]" style={{fontFamily: 'Manrope, sans-serif'}}>{name}</span>
     </div>
-    <p className="text-[11px] text-[#4A4A4A]">{description}</p>
+    <p className="text-[11px] text-[#4A4A4A] mb-2">{description}</p>
+    {comingSoon && (
+      <span className="inline-block px-2 py-0.5 rounded-full bg-[#E1BAC2]/20 text-[#8B6F75] text-[9px] font-mono font-bold uppercase tracking-wider">
+        Coming Soon
+      </span>
+    )}
   </button>
 );

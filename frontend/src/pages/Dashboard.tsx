@@ -300,6 +300,21 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
             </div>
           </div>
 
+          {/* Warning: No Strategy Active */}
+          {!hasActiveStrategy && (
+            <div className="mb-6 p-4 rounded-2xl bg-amber-50 border border-amber-200">
+              <div className="flex items-start gap-3">
+                <Zap className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-xs font-bold text-amber-800 mb-1">Strategy Not Yet Deployed</p>
+                  <p className="text-[11px] text-amber-700 leading-relaxed">
+                    Your {totalAssetsFormatted.toFixed(2)} FXRP is safely held in the vault. The FCC/TEE will automatically deploy funds to the best-yielding strategy once activated. No yield is being earned until deployment occurs.
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Strategy Details Grid */}
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
             <div className="p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
