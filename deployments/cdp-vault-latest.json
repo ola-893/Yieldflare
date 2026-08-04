@@ -1,0 +1,20 @@
+{
+  "chainId": 114,
+  "network": "Coston2",
+  "timestamp": 1785842280,
+  "deployer": "0x506e724d7FDdbF91B6607d5Af0700d385D952f8a",
+  "vaults": {
+    "cdpVault": "0x71cF7B0f792400a2533e917bcfB3892b34b569e8",
+    "cdpVaultImplementation": "0x0b27ce888AD1753b5d89c327A5eF0FDA9003305c"
+  },
+  "strategies": {
+    "enosysCdpAdapter": "0x276BBc877C3d50e50848E7ca8c68241D959F4800"
+  },
+  "references": {
+    "cdpToken": "0x41D503D78D319D685fb9311363732009f7224059",
+    "wc2flrToken": "0xC67DCE33D7A8efA5FfEB961899C73fe01bCe9273",
+    "enosysRouter": "0xD2fD55647A90fD1f2D071e115Bb713B3C145D5e2",
+    "enosysPool": "0x81e7628F5add2286E798B6b77B4C5ace4C62A40E",
+    "poolFee": 3000
+  }
+}

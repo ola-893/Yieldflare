@@ -1,0 +1,17 @@
+{
+  "chainId": 114,
+  "network": "Coston2",
+  "timestamp": $(date +%s),
+  "deployer": "0x506e724d7FDdbF91B6607d5Af0700d385D952f8a",
+  "strategies": {
+    "ftsoV2Delegation": "0x8172FF869D9bB58CC70580bE7Cc04050481b9370",
+    "sparkDex": "0xaD1C9c72db1604C4C888648D45094326032968a5",
+    "smartAccountDirectMint": "NOT_DEPLOYED"
+  },
+  "references": {
+    "parentVault": "0x01f64160E4928Eba5607aE294F9B66090Dc323B3",
+    "fxrp": "0x0b6A3645c240605887a5532109323A3E12273dc7",
+    "mintingTagManager": "0x094511737909b626391106bBc21B25feb2D67B96"
+  },
+  "notes": "SmartAccountDirectMintAdapter skipped - AssetManager address not valid on Coston2"
+}

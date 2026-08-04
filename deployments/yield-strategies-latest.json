@@ -1,0 +1,22 @@
+{
+  "chainId": 114,
+  "network": "Coston2",
+  "timestamp": 1785839462,
+  "deployer": "0x506e724d7FDdbF91B6607d5Af0700d385D952f8a",
+  "strategies": {
+    "ftsoV2Delegation": "0xa0811A54F72Fd3e7b0F30d75227741feFE2755fB",
+    "sparkDex": "0xA88327A42267C0dE171CBECA1b016dEF2e990612",
+    "smartAccountDirectMint": "0xE0395E7B9Ac8B39463b85a8B20D93c2429F7D4Aa",
+    "enosys": "0x5A839334A11983b958a7C70a8822783db6Be4bf6",
+    "enosysAvailable": true
+  },
+  "references": {
+    "parentVault": "0x01f64160E4928Eba5607aE294F9B66090Dc323B3",
+    "fxrp": "0x0b6A3645c240605887a5532109323A3E12273dc7",
+    "assetManagerFXRP": "0xc1Ca88b937d0b528842F95d5731ffB586f4fbDFA",
+    "mintingTagManager": "0x094511737909b626391106bBc21B25feb2D67B96",
+    "enosysRouter": "0xD2fD55647A90fD1f2D071e115Bb713B3C145D5e2",
+    "enosysPool": "0x81e7628F5add2286E798B6b77B4C5ace4C62A40E",
+    "wflr": "0xC67DCE33D7A8efA5FfEB961899C73fe01bCe9273"
+  }
+}

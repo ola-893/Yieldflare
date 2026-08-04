@@ -42,12 +42,12 @@ library NetworkConfig {
             name: "Coston2",
             flareContractRegistry: 0xaD67FE66660Fb8dFE9d6b1b4240d8650e30F6019,
             hasKineticDeployment: false, // Kinetic is mainnet-only
-            hasEnosysDeployment: false, // Enosys is mainnet-only
+            hasEnosysDeployment: true, // Enosys V3 deployed on Coston2!
             kineticComptroller: address(0),
             kineticKFXRP: address(0),
-            enosysRouter: address(0),
-            enosysPoolFXRPWFLR: address(0),
-            wflr: address(0) // Not needed for testnet (no DEX strategies)
+            enosysRouter: 0xD2fD55647A90fD1f2D071e115Bb713B3C145D5e2, // Enosys V3 Position Manager / Router
+            enosysPoolFXRPWFLR: 0x81e7628F5add2286E798B6b77B4C5ace4C62A40E, // Enosys V3 Active Pool
+            wflr: 0xC67DCE33D7A8efA5FfEB961899C73fe01bCe9273 // WC2FLR / WFLR on Coston2
         });
     }
 
