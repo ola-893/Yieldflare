@@ -14,6 +14,18 @@ export const COSTON2_CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID) || 114;
 /**
  * Core FlareYield Protocol Contracts - Multi-Vault Architecture
  */
+/**
+ * FCE (Flare Compute Extension) Configuration
+ * TEE extension for autonomous vault rebalancing
+ */
+export const FCE_CONFIG = {
+  // FCE extension HTTP endpoint (for rebalance signing)
+  endpoint: import.meta.env.VITE_FCE_ENDPOINT || 'http://localhost:8080',
+  // Operation types matching fce-extension/src/app/config.ts
+  opType: 'VAULT_REBALANCE',
+  opCommand: 'CALCULATE_OPTIMAL',
+} as const;
+
 export const CONTRACTS = {
   // === FXRP Vault (Growth-Oriented) ===
   vaults: {
@@ -103,6 +115,10 @@ export const PARENT_VAULT_ABI = [
   {type:'function',name:'fAssetAdapter',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
   {type:'function',name:'totalPendingFAssetDeposits',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint256'}]},
   {type:'function',name:'pendingFAssetDeposits',stateMutability:'view',inputs:[{name:'depositId',type:'bytes32'}],outputs:[{name:'receiver',type:'address'},{name:'queuedAt',type:'uint256'}]},
+  {type:'function',name:'teeLastActive',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'rebalanceNonce',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'liquidityBufferBps',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint16'}]},
+  {type:'function',name:'fccSigner',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
   // Events
   {type:'event',name:'Deposit',inputs:[{name:'sender',type:'address',indexed:true},{name:'owner',type:'address',indexed:true},{name:'assets',type:'uint256',indexed:false},{name:'shares',type:'uint256',indexed:false}]},
   {type:'event',name:'Withdraw',inputs:[{name:'sender',type:'address',indexed:true},{name:'receiver',type:'address',indexed:true},{name:'owner',type:'address',indexed:true},{name:'assets',type:'uint256',indexed:false},{name:'shares',type:'uint256',indexed:false}]},
@@ -164,6 +180,13 @@ export const MINTING_TAG_MANAGER_ABI = [
   {type:'function',name:'mintingRecipient',stateMutability:'view',inputs:[{name:'tag',type:'uint256'}],outputs:[{name:'',type:'address'}]},
   {type:'function',name:'allowedExecutor',stateMutability:'view',inputs:[{name:'tag',type:'uint256'}],outputs:[{name:'',type:'address'}]},
   {type:'function',name:'reservedTagsForOwner',stateMutability:'view',inputs:[{name:'owner',type:'address'}],outputs:[{name:'',type:'uint256[]'}]},
+] as const;
+
+// StrategyAdapter minimal ABI
+export const STRATEGY_ADAPTER_ABI = [
+  {type:'function',name:'totalValue',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'vault',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
+  {type:'function',name:'underlyingAsset',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
 ] as const;
 
 /**

@@ -6,6 +6,7 @@ import {Lock, RefreshCw, Check, ArrowRight, Copy, Clock, AlertCircle, Coins, Shi
 import xrpImg from '../assets/images/xrp.webp';
 import btcImg from '../assets/images/btc.webp';
 import {CONTRACTS, FASSET_ADAPTER_ABI, ASSET_MANAGER_ABI, MINTING_TAG_MANAGER_ABI, PARENT_VAULT_ABI} from '../config/contracts';
+import {requestSignedRebalance, checkFceHealth} from '../services/fceClient';
 
 type DepositFlow = 'FASSET' | 'ERC4626';
 type FassetStep = 'SELECT' | 'RESERVE_TAG' | 'AWAITING_DEPOSIT' | 'READY_TO_SETTLE' | 'SETTLING' | 'DEPLOY' | 'COMPLETE';
@@ -232,32 +233,88 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const {writeContract: executeRebalance, data: rebalanceHash, isPending: isRebalancing, error: rebalanceError} = useWriteContract();
   const {isLoading: isRebalanceConfirming, error: rebalanceReceiptError} = useWaitForTransactionReceipt({hash: rebalanceHash});
 
-  const handleDeployToStrategy = () => {
-    // Rebalance payload - will be signed by TEE/keeper
-    // For now, construct a basic payload targeting the first approved strategy
-    const payload = {
-      newStrategy: CONTRACTS.strategies.enosysFxrp,
-      minAmountOut: 0n,
-      nonce: 0n, // Will be read from contract
-      deadline: BigInt(Math.floor(Date.now() / 1000) + 3600), // 1 hour from now
-      twapStart: BigInt(Math.floor(Date.now() / 1000) - 86400), // 24h ago
-      twapEnd: BigInt(Math.floor(Date.now() / 1000)),
-      strategyDataHash: '0x0000000000000000000000000000000000000000000000000000000000000000' as `0x${string}`,
-      signature: '0x' as `0x${string}`,
-    };
+  const [isRequestingSignature, setIsRequestingSignature] = useState(false);
+  const [fceError, setFceError] = useState<string | null>(null);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    executeRebalance({
-      address: CONTRACTS.parentVault,
-      abi: PARENT_VAULT_ABI as any,
-      functionName: 'executeRebalance',
-      args: [payload],
-    } as any);
-    setStep('COMPLETE');
+  // ─── Auto-deploy fallback state ──────────────────────────────────────────
+  const AUTO_DEPLOY_SECONDS = 300; // 5 minutes default
+  const [autoDeployDeadline, setAutoDeployDeadline] = useState<number | null>(null);
+  const [autoDeployStatus, setAutoDeployStatus] = useState<'idle' | 'counting' | 'deploying' | 'success' | 'failed'>('idle');
+  const [autoDeployError, setAutoDeployError] = useState<string | null>(null);
+  const [autoDeployRemaining, setAutoDeployRemaining] = useState(AUTO_DEPLOY_SECONDS);
+
+  // Restore auto-deploy state from localStorage on mount
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('flux-auto-deploy');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed.deadline && parsed.deadline > Date.now()) {
+          setAutoDeployDeadline(parsed.deadline);
+          setAutoDeployStatus('counting');
+          setXrplAmount(parsed.xrplAmount || null);
+        } else if (parsed.deadline && parsed.deadline <= Date.now()) {
+          // Deadline passed while away — trigger immediately
+          setAutoDeployDeadline(parsed.deadline);
+          setAutoDeployStatus('deploying');
+          setXrplAmount(parsed.xrplAmount || null);
+        }
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const handleDeployToStrategy = async () => {
+    // Cancel any pending auto-deploy if user manually deploys
+    cancelAutoDeploy();
+    setIsRequestingSignature(true);
+    setFceError(null);
+
+    try {
+      // 1. Check FCE extension health
+      const isHealthy = await checkFceHealth();
+      if (!isHealthy) {
+        throw new Error('TEE extension is not available. Please ensure the FCE extension is running on port 8080.');
+      }
+
+      // 2. Request signed rebalance payload from TEE
+      const signedPayload = await requestSignedRebalance({
+        vaultAddress: CONTRACTS.parentVault,
+        idleAssets: xrplAmount ? BigInt(Math.floor(parseFloat(xrplAmount) * 1e6)) : 0n,
+        approvedStrategies: [CONTRACTS.strategies.enosysFxrp],
+        liquidityBufferBps: 1000, // 10% buffer
+      });
+
+      console.log('[Deploy] Signed payload received, submitting to chain...');
+
+      // 3. Submit signed payload to executeRebalance()
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      executeRebalance({
+        address: CONTRACTS.parentVault,
+        abi: PARENT_VAULT_ABI as any,
+        functionName: 'executeRebalance',
+        args: [signedPayload],
+      } as any);
+
+      setIsRequestingSignature(false);
+    } catch (err) {
+      console.error('[Deploy] Error:', err);
+      setFceError(err instanceof Error ? err.message : String(err));
+      setIsRequestingSignature(false);
+    }
   };
 
   const handleSkipDeploy = () => {
     setStep('COMPLETE');
+    // Start auto-deploy countdown
+    const deadline = Date.now() + AUTO_DEPLOY_SECONDS * 1000;
+    setAutoDeployDeadline(deadline);
+    setAutoDeployStatus('counting');
+    setAutoDeployRemaining(AUTO_DEPLOY_SECONDS);
+    localStorage.setItem('flux-auto-deploy', JSON.stringify({
+      deadline,
+      xrplAmount,
+      strategy: CONTRACTS.strategies.enosysFxrp,
+    }));
   };
 
   const handleCopyTag = () => {
@@ -411,8 +468,76 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   }, [depositHash, isDepositConfirming, step, refetchCdpBalance]);
 
   // ─── Reset ────────────────────────────────────────────────────────────────
+  const cancelAutoDeploy = () => {
+    setAutoDeployDeadline(null);
+    setAutoDeployStatus('idle');
+    setAutoDeployError(null);
+    localStorage.removeItem('flux-auto-deploy');
+  };
+
+  // Countdown timer effect
+  useEffect(() => {
+    if (autoDeployStatus !== 'counting' || !autoDeployDeadline) return;
+
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((autoDeployDeadline - Date.now()) / 1000));
+      setAutoDeployRemaining(remaining);
+
+      if (remaining <= 0) {
+        clearInterval(interval);
+        // Auto-trigger deploy
+        setAutoDeployStatus('deploying');
+        triggerAutoDeploy();
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [autoDeployStatus, autoDeployDeadline]);
+
+  const triggerAutoDeploy = async () => {
+    setAutoDeployError(null);
+    try {
+      const isHealthy = await checkFceHealth();
+      if (!isHealthy) {
+        throw new Error('TEE extension not available. Auto-deploy skipped.');
+      }
+
+      const signedPayload = await requestSignedRebalance({
+        vaultAddress: CONTRACTS.parentVault,
+        idleAssets: xrplAmount ? BigInt(Math.floor(parseFloat(xrplAmount) * 1e6)) : 0n,
+        approvedStrategies: [CONTRACTS.strategies.enosysFxrp],
+        liquidityBufferBps: 1000,
+      });
+
+      executeRebalance({
+        address: CONTRACTS.parentVault,
+        abi: PARENT_VAULT_ABI as any,
+        functionName: 'executeRebalance',
+        args: [signedPayload],
+      } as any);
+
+      localStorage.removeItem('flux-auto-deploy');
+    } catch (err) {
+      console.error('[AutoDeploy] Error:', err);
+      setAutoDeployError(err instanceof Error ? err.message : String(err));
+      setAutoDeployStatus('failed');
+      localStorage.removeItem('flux-auto-deploy');
+    }
+  };
+
+  // Watch for successful rebalance during auto-deploy
+  useEffect(() => {
+    if (autoDeployStatus === 'deploying' && rebalanceHash && !isRebalanceConfirming) {
+      setAutoDeployStatus('success');
+      localStorage.removeItem('flux-auto-deploy');
+    }
+  }, [autoDeployStatus, rebalanceHash, isRebalanceConfirming]);
+
   const handleReset = () => {
     localStorage.removeItem('flux-deposit-state');
+    localStorage.removeItem('flux-auto-deploy');
+    setAutoDeployDeadline(null);
+    setAutoDeployStatus('idle');
     setStep(depositFlow === 'ERC4626' ? 'ERC4626_SELECT' : 'SELECT');
     setReservedTag(null);
     setDepositId(null);
@@ -528,6 +653,18 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
         {/* Step Indicator */}
         <StepIndicator steps={currentSteps} currentStep={step} />
 
+        {/* Auto-deploy banner */}
+        {autoDeployStatus !== 'idle' && depositFlow === 'FASSET' && (
+          <AutoDeployBanner
+            status={autoDeployStatus}
+            remaining={autoDeployRemaining}
+            error={autoDeployError}
+            totalSeconds={AUTO_DEPLOY_SECONDS}
+            onCancel={cancelAutoDeploy}
+            onRetry={triggerAutoDeploy}
+          />
+        )}
+
         {/* Step Content */}
         <AnimatePresence mode="wait">
           {/* ═══ FAsset Flow ═══ */}
@@ -593,9 +730,10 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
               xrplAmount={xrplAmount}
               onDeploy={handleDeployToStrategy}
               onSkip={handleSkipDeploy}
-              isDeploying={isRebalancing}
+              isDeploying={isRebalancing || isRequestingSignature}
               isConfirming={isRebalanceConfirming}
-              error={rebalanceError?.message || rebalanceReceiptError?.message}
+              error={fceError || rebalanceError?.message || rebalanceReceiptError?.message}
+              isRequestingSignature={isRequestingSignature}
             />
           )}
 
@@ -1054,7 +1192,8 @@ const StepDeployToStrategy: React.FC<{
   isDeploying: boolean;
   isConfirming: boolean;
   error?: string | null;
-}> = ({xrplAmount, onDeploy, onSkip, isDeploying, isConfirming, error}) => (
+  isRequestingSignature?: boolean;
+}> = ({xrplAmount, onDeploy, onSkip, isDeploying, isConfirming, error, isRequestingSignature}) => (
   <motion.div
     initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
     className="glass-panel p-6 sm:p-8 rounded-3xl border border-[#1E1E1E]/15 shadow-soft-editorial bg-white/60"
@@ -1095,15 +1234,15 @@ const StepDeployToStrategy: React.FC<{
       <div className="space-y-2">
         <div className="flex items-start gap-2 text-[11px] text-[#4A4A4A]">
           <span className="w-1.5 h-1.5 rounded-full bg-[#E1BAC2] mt-1.5 shrink-0" />
-          <span>TEE monitors yields 24/7 and rebalances when better opportunities arise</span>
+          <span>TEE extension signs the rebalance with the fccSigner key</span>
         </div>
         <div className="flex items-start gap-2 text-[11px] text-[#4A4A4A]">
           <span className="w-1.5 h-1.5 rounded-full bg-[#E1BAC2] mt-1.5 shrink-0" />
-          <span>Your Flux tokens accrue value automatically through compounding</span>
+          <span>Capital is deployed to the optimal yield strategy</span>
         </div>
         <div className="flex items-start gap-2 text-[11px] text-[#4A4A4A]">
           <span className="w-1.5 h-1.5 rounded-full bg-[#E1BAC2] mt-1.5 shrink-0" />
-          <span>Non-custodial — you can withdraw anytime</span>
+          <span>TEE monitors yields 24/7 and rebalances automatically</span>
         </div>
       </div>
     </div>
@@ -1120,7 +1259,9 @@ const StepDeployToStrategy: React.FC<{
         disabled={isDeploying || isConfirming}
         className="py-3.5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] text-[11px] font-bold uppercase tracking-[0.15em] hover:bg-[#000000] transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
       >
-        {isDeploying || isConfirming ? (
+        {isRequestingSignature ? (
+          <><RefreshCw className="w-4 h-4 animate-spin" /><span>Requesting TEE Signature...</span></>
+        ) : isDeploying || isConfirming ? (
           <><RefreshCw className="w-4 h-4 animate-spin" /><span>Deploying...</span></>
         ) : (
           <><Zap className="w-4 h-4 text-[#E1BAC2]" /><span>Deploy to Strategy</span></>
@@ -1135,6 +1276,119 @@ const StepDeployToStrategy: React.FC<{
     </div>
   </motion.div>
 );
+
+// ─── Auto-deploy Fallback Banner ─────────────────────────────────────────
+const AutoDeployBanner: React.FC<{
+  status: 'counting' | 'deploying' | 'success' | 'failed';
+  remaining: number;
+  error: string | null;
+  totalSeconds: number;
+  onCancel: () => void;
+  onRetry: () => void;
+}> = ({status, remaining, error, totalSeconds, onCancel, onRetry}) => {
+  const minutes = Math.floor(remaining / 60);
+  const seconds = remaining % 60;
+  const progress = ((totalSeconds - remaining) / totalSeconds) * 100;
+
+  const bgColor = {
+    counting: 'bg-amber-50/90 border-amber-300/50',
+    deploying: 'bg-blue-50/90 border-blue-300/50',
+    success: 'bg-emerald-50/90 border-emerald-300/50',
+    failed: 'bg-red-50/90 border-red-300/50',
+  }[status];
+
+  const textColor = {
+    counting: 'text-amber-800',
+    deploying: 'text-blue-800',
+    success: 'text-emerald-800',
+    failed: 'text-red-800',
+  }[status];
+
+  const subtextColor = {
+    counting: 'text-amber-600',
+    deploying: 'text-blue-600',
+    success: 'text-emerald-600',
+    failed: 'text-red-600',
+  }[status];
+
+  return (
+    <motion.div
+      initial={{opacity: 0, y: -20}}
+      animate={{opacity: 1, y: 0}}
+      exit={{opacity: 0, y: -20}}
+      className={`rounded-2xl border p-4 mb-6 ${bgColor}`}
+    >
+      <div className="flex items-start gap-3">
+        <div className="shrink-0 mt-0.5">
+          {status === 'counting' && <Clock className={`w-5 h-5 ${textColor} animate-pulse`} />}
+          {status === 'deploying' && <RefreshCw className={`w-5 h-5 ${textColor} animate-spin`} />}
+          {status === 'success' && <Check className={`w-5 h-5 ${textColor}`} />}
+          {status === 'failed' && <AlertCircle className={`w-5 h-5 ${textColor}`} />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between mb-1">
+            <p className={`text-xs font-bold ${textColor}`}>
+              {status === 'counting' && 'Auto-deploy in progress'}
+              {status === 'deploying' && 'Deploying to strategy...'}
+              {status === 'success' && 'Auto-deploy successful!'}
+              {status === 'failed' && 'Auto-deploy failed'}
+            </p>
+            {status === 'counting' && (
+              <span className="text-xs font-mono font-bold text-amber-700">
+                {minutes}:{seconds.toString().padStart(2, '0')}
+              </span>
+            )}
+          </div>
+
+          {status === 'counting' && (
+            <>
+              <p className={`text-[11px] ${subtextColor} mb-2`}>
+                Capital will be deployed to yield strategy automatically. You can cancel below.
+              </p>
+              {/* Progress bar */}
+              <div className="w-full h-1.5 rounded-full bg-amber-200/50 mb-2">
+                <div
+                  className="h-full rounded-full bg-amber-500 transition-all duration-1000"
+                  style={{width: `${progress}%`}}
+                />
+              </div>
+              <button
+                onClick={onCancel}
+                className="text-[10px] font-bold text-amber-700 underline underline-offset-2 hover:text-amber-900 transition-colors"
+              >
+                Cancel auto-deploy
+              </button>
+            </>
+          )}
+
+          {status === 'deploying' && (
+            <p className={`text-[11px] ${subtextColor}`}>
+              Requesting TEE signature and submitting rebalance transaction...
+            </p>
+          )}
+
+          {status === 'success' && (
+            <p className={`text-[11px] ${subtextColor}`}>
+              Your FXRP has been deployed to the yield strategy. Check your dashboard for yield accrual.
+            </p>
+          )}
+
+          {status === 'failed' && (
+            <>
+              <p className="text-[11px] text-red-600 mb-2 font-mono break-all">{error}</p>
+              <button
+                onClick={onRetry}
+                className="text-[10px] font-bold text-red-700 underline underline-offset-2 hover:text-red-900 transition-colors"
+              >
+                Retry deploy
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    </motion.div>
+  );
+};
 
 // ─── FAsset Step: Complete ──────────────────────────────────────────────────
 const StepComplete: React.FC<{
