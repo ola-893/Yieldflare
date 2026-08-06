@@ -14,7 +14,7 @@ interface IParentVault {
         uint256 twapStart;
         uint256 twapEnd;
         bytes32 strategyDataHash;
-        bytes signature;
+        // Note: signature is NOT part of resultData - it's passed separately to executeRebalance()
     }
 
     event Rebalanced(
@@ -26,6 +26,12 @@ interface IParentVault {
     function withdraw(uint256 assets, address receiver, address owner) external returns (uint256 shares);
     function queueFAssetDeposit(bytes32 depositId, address receiver) external;
     function settleFAssetDeposit(bytes32 depositId, uint256 assets) external returns (uint256 shares);
-    function executeRebalance(RebalancePayload calldata payload) external;
+    function executeRebalance(
+        bytes calldata resultData,
+        bytes32 actionId,
+        string calldata submissionTag,
+        uint8 status,
+        bytes calldata signature
+    ) external;
     function totalUnderlyingValue() external view returns (uint256);
 }

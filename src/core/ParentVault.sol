@@ -4,7 +4,6 @@ pragma solidity ^0.8.24;
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {SafeERC20} from "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import {ECDSA} from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
-import {MessageHashUtils} from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts/proxy/utils/UUPSUpgradeable.sol";
 import {ERC4626Upgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC20/extensions/ERC4626Upgradeable.sol";
@@ -13,6 +12,8 @@ import {PausableUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/Pau
 
 import {IParentVault} from "../interfaces/IParentVault.sol";
 import {IStrategyAdapter} from "../interfaces/IStrategyAdapter.sol";
+import {IInstructionSender} from "../interfaces/IInstructionSender.sol";
+import {ITeeExtensionRegistry} from "../interfaces/ITeeExtensionRegistry.sol";
 
 /**
  * @title ParentVault
@@ -34,13 +35,12 @@ contract ParentVault is
     uint256 public constant MIN_TWAP_WINDOW = 24 hours;
     uint256 public constant MAX_TWAP_AGE = 2 hours;
 
-    bytes32 public constant REBALANCE_TYPEHASH = keccak256(
-        "RebalancePayload(address newStrategy,uint256 minAmountOut,uint256 nonce,uint256 deadline,uint256 twapStart,uint256 twapEnd,bytes32 strategyDataHash)"
-    );
-    bytes32 private constant DOMAIN_TYPEHASH =
-        keccak256("EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)");
-    bytes32 private constant NAME_HASH = keccak256("Flux ParentVault");
-    bytes32 private constant VERSION_HASH = keccak256("1");
+    // FCE Operation identifiers (plain strings, not hashed)
+    bytes32 public constant OP_TYPE_VAULT_REBALANCE = bytes32("VAULT_REBALANCE");
+    bytes32 public constant OP_COMMAND_CALCULATE_OPTIMAL = bytes32("CALCULATE_OPTIMAL");
+
+    // TEE Action Result prefix (literal bytes32, NOT hashed)
+    bytes32 private constant TEE_ACTION_RESULT_PREFIX = bytes32("TEE_ACTION_RESULT");
 
     error ZeroAddress();
     error UnauthorizedFAssetAdapter(address caller);
@@ -62,6 +62,7 @@ contract ParentVault is
     error UnexpectedAssetTransfer(uint256 expected, uint256 actual);
     error StrategyNotFullyWithdrawn(address strategy, uint256 residualValue);
     error FAssetDepositAlreadySettled(bytes32 depositId);
+    error InsufficientIdleAssets(uint256 available, uint256 threshold);
 
     event StrategyApprovalUpdated(address indexed strategy, bool approved);
     event FccSignerUpdated(address indexed previousSigner, address indexed newSigner);
@@ -70,12 +71,27 @@ contract ParentVault is
     event FAssetDepositQueued(bytes32 indexed depositId, address indexed receiver);
     event FAssetDepositSettled(bytes32 indexed depositId, address indexed receiver, uint256 assets, uint256 shares);
     event EmergencyWithdrawal(address indexed strategy, uint256 assetsWithdrawn);
+    event InstructionSenderUpdated(address indexed previousSender, address indexed newSender);
+    event RebalanceRequested(bytes32 indexed instructionId, uint256 idleAssets, uint256 approvedStrategiesCount);
+    event TeeAddressUpdated(address indexed previousTeeAddress, address indexed newTeeAddress);
+
+    /// @notice TEE node signing address for action result verification
+    address public teeAddress;
 
     /// @notice Authorized address for FCC/TEE rebalance attestations.
     address public fccSigner;
 
     /// @notice Adapter allowed to create and settle asynchronous FAsset deposits.
     address public fAssetAdapter;
+
+    /// @notice FCE Instruction Sender for triggering TEE rebalances.
+    address public instructionSender;
+
+    /// @notice Last instruction ID generated (bytes32, not uint256)
+    bytes32 public lastInstructionId;
+
+    /// @notice Minimum idle assets required to trigger automatic rebalance.
+    uint256 public rebalanceThreshold;
 
     /// @notice Adapter currently holding the deployed capital, if any.
     address public activeStrategy;
@@ -232,13 +248,127 @@ contract ParentVault is
     }
 
     /**
-     * @notice Executes a FCC-authorized strategy migration.
-     * @dev The signature commits to a 24+ hour historical-yield observation window. The contract cannot prove
-     *      off-chain APY provenance itself; that duty remains inside the TEE, while the signed declaration makes
-     *      a spot-only observation rejectable on-chain.
+     * @notice Trigger a TEE rebalance by sending instruction to FCE extension
+     * @dev Can be called manually or automatically on deposit if threshold is met
      */
-    function executeRebalance(RebalancePayload calldata payload) external override whenNotPaused nonReentrant {
-        _validateRebalance(payload);
+    function requestRebalance() public whenNotPaused {
+        if (instructionSender == address(0)) return; // Silently skip if not configured
+        
+        uint256 idleAssets = IERC20(asset()).balanceOf(address(this));
+        if (idleAssets < rebalanceThreshold) {
+            revert InsufficientIdleAssets(idleAssets, rebalanceThreshold);
+        }
+
+        // Build approved strategies array
+        address[] memory strategies = getApprovedStrategiesArray();
+        
+        // Encode rebalance request for FCE extension
+        bytes memory message = abi.encode(
+            address(this),
+            idleAssets,
+            strategies,
+            liquidityBufferBps
+        );
+
+        // Build TeeInstructionParams
+        ITeeExtensionRegistry.TeeInstructionParams memory params = ITeeExtensionRegistry.TeeInstructionParams({
+            opType: OP_TYPE_VAULT_REBALANCE,
+            opCommand: OP_COMMAND_CALCULATE_OPTIMAL,
+            message: message,
+            cosigners: new address[](0),
+            cosignersThreshold: 0,
+            claimBackAddress: address(this)
+        });
+
+        // Send instruction to TEE Extension Registry (returns bytes32 instructionId)
+        bytes32 instructionId = IInstructionSender(instructionSender).sendInstructions(params);
+        lastInstructionId = instructionId;
+
+        emit RebalanceRequested(instructionId, idleAssets, strategies.length);
+    }
+
+    /**
+     * @notice Get array of approved strategy addresses
+     * @dev Helper for requestRebalance - iterates through known strategies
+     */
+    function getApprovedStrategiesArray() public view returns (address[] memory) {
+        // For production: maintain a proper EnumerableSet or array
+        // For demo: check known strategies
+        address[] memory potentialStrategies = new address[](3);
+        potentialStrategies[0] = 0xa0811A54F72Fd3e7b0F30d75227741feFE2755fB; // FTSO
+        potentialStrategies[1] = 0xA88327A42267C0dE171CBECA1b016dEF2e990612; // SparkDex
+        potentialStrategies[2] = 0x276BBc877C3d50e50848E7ca8c68241D959F4800; // Enosys CDP
+
+        // Count approved strategies
+        uint256 count = 0;
+        for (uint256 i = 0; i < potentialStrategies.length; i++) {
+            if (approvedStrategies[potentialStrategies[i]]) {
+                count++;
+            }
+        }
+
+        // Build approved array
+        address[] memory approved = new address[](count);
+        uint256 index = 0;
+        for (uint256 i = 0; i < potentialStrategies.length; i++) {
+            if (approvedStrategies[potentialStrategies[i]]) {
+                approved[index++] = potentialStrategies[i];
+            }
+        }
+
+        return approved;
+    }
+
+    /**
+     * @notice Executes a TEE-authorized strategy migration.
+     * @dev Accepts ActionResult format from TEE node: (resultData, actionId, submissionTag, status, signature)
+     * @param resultData ABI-encoded RebalancePayload
+     * @param actionId Instruction ID (bytes32)
+     * @param submissionTag TEE submission identifier
+     * @param status Result status (1 = success)
+     * @param signature TEE signature over ActionResult hash (EIP-191 personal_sign)
+     */
+    function executeRebalance(
+        bytes calldata resultData,
+        bytes32 actionId,
+        string calldata submissionTag,
+        uint8 status,
+        bytes calldata signature
+    ) external override whenNotPaused nonReentrant {
+        require(teeAddress != address(0), "TEE address not set");
+        require(status == 1, "TEE reported failure");
+
+        // Verify TEE signature using EIP-191 personal_sign (3-layer hash)
+        
+        // Layer 1: resultHash from action result components
+        bytes32 resultHash = keccak256(abi.encodePacked(
+            keccak256(resultData),
+            actionId,
+            keccak256(bytes(submissionTag)),
+            status
+        ));
+
+        // Layer 2: payloadHash with domain separation
+        bytes32 payloadHash = keccak256(abi.encode(
+            TEE_ACTION_RESULT_PREFIX,  // Literal bytes32("TEE_ACTION_RESULT"), not hashed
+            block.chainid,
+            resultHash
+        ));
+
+        // Layer 3: EIP-191 personal_sign wrapper
+        bytes32 ethHash = keccak256(abi.encodePacked(
+            "\x19Ethereum Signed Message:\n32",
+            payloadHash
+        ));
+
+        address recoveredSigner = ECDSA.recover(ethHash, signature);
+        require(recoveredSigner == teeAddress, "Invalid TEE signature");
+
+        // Decode the actual payload
+        RebalancePayload memory payload = abi.decode(resultData, (RebalancePayload));
+        
+        // Validate payload constraints
+        _validateRebalancePayload(payload);
 
         address previousStrategy = activeStrategy;
         if (payload.newStrategy == previousStrategy) revert StrategyUnchanged();
@@ -341,6 +471,22 @@ contract ParentVault is
         emit LiquidityBufferUpdated(previousBufferBps, newBufferBps);
     }
 
+    function setInstructionSender(address newSender) external onlyOwner {
+        address previousSender = instructionSender;
+        instructionSender = newSender;
+        emit InstructionSenderUpdated(previousSender, newSender);
+    }
+
+    function setTeeAddress(address newTeeAddress) external onlyOwner {
+        address previousTeeAddress = teeAddress;
+        teeAddress = newTeeAddress;
+        emit TeeAddressUpdated(previousTeeAddress, newTeeAddress);
+    }
+
+    function setRebalanceThreshold(uint256 newThreshold) external onlyOwner {
+        rebalanceThreshold = newThreshold;
+    }
+
     function pause() external onlyOwner {
         _pause();
     }
@@ -350,17 +496,21 @@ contract ParentVault is
     }
 
     /**
-     * @notice EIP-712 domain separator used for FCC rebalance attestations.
+     * @notice Validates a rebalance payload (nonce, deadline, TWAP windows)
+     * @dev Extracted from executeRebalance for clarity
      */
-    function domainSeparator() public view returns (bytes32) {
-        return keccak256(abi.encode(DOMAIN_TYPEHASH, NAME_HASH, VERSION_HASH, block.chainid, address(this)));
-    }
-
-    /**
-     * @notice Digest a TEE signs for a rebalance. The `signature` field is intentionally excluded.
-     */
-    function rebalanceDigest(RebalancePayload calldata payload) external view returns (bytes32) {
-        return _rebalanceDigest(payload);
+    function _validateRebalancePayload(RebalancePayload memory payload) private view {
+        if (payload.nonce != rebalanceNonce) revert InvalidNonce(rebalanceNonce, payload.nonce);
+        if (block.timestamp > payload.deadline) revert RebalanceExpired(payload.deadline, block.timestamp);
+        if (payload.twapEnd > block.timestamp || payload.twapEnd <= payload.twapStart) {
+            revert InvalidTwapWindow(payload.twapStart, payload.twapEnd);
+        }
+        if (payload.twapEnd - payload.twapStart < MIN_TWAP_WINDOW) {
+            revert InvalidTwapWindow(payload.twapStart, payload.twapEnd);
+        }
+        if (block.timestamp - payload.twapEnd > MAX_TWAP_AGE) {
+            revert StaleTwap(payload.twapEnd, block.timestamp);
+        }
     }
 
     function _withdraw(address caller, address receiver, address owner, uint256 assets, uint256 shares)
@@ -389,39 +539,15 @@ contract ParentVault is
         super._deposit(caller, receiver, assets, shares);
         uint256 assetsReceived = IERC20(asset()).balanceOf(address(this)) - balanceBefore;
         if (assetsReceived != assets) revert UnexpectedAssetTransfer(assets, assetsReceived);
-    }
 
-    function _validateRebalance(RebalancePayload calldata payload) private view {
-        if (payload.nonce != rebalanceNonce) revert InvalidNonce(rebalanceNonce, payload.nonce);
-        if (block.timestamp > payload.deadline) revert RebalanceExpired(payload.deadline, block.timestamp);
-        if (payload.twapEnd > block.timestamp || payload.twapEnd <= payload.twapStart) {
-            revert InvalidTwapWindow(payload.twapStart, payload.twapEnd);
+        // Automatic rebalance trigger for demo
+        if (instructionSender != address(0) && rebalanceThreshold > 0) {
+            uint256 currentIdle = IERC20(asset()).balanceOf(address(this));
+            if (currentIdle >= rebalanceThreshold) {
+                // Try to trigger rebalance, but don't revert if it fails
+                try this.requestRebalance() {} catch {}
+            }
         }
-        if (payload.twapEnd - payload.twapStart < MIN_TWAP_WINDOW) {
-            revert InvalidTwapWindow(payload.twapStart, payload.twapEnd);
-        }
-        if (block.timestamp - payload.twapEnd > MAX_TWAP_AGE) {
-            revert StaleTwap(payload.twapEnd, block.timestamp);
-        }
-
-        address recoveredSigner = ECDSA.recover(_rebalanceDigest(payload), payload.signature);
-        if (recoveredSigner != fccSigner) revert InvalidTeeSignature(recoveredSigner);
-    }
-
-    function _rebalanceDigest(RebalancePayload calldata payload) private view returns (bytes32) {
-        bytes32 structHash = keccak256(
-            abi.encode(
-                REBALANCE_TYPEHASH,
-                payload.newStrategy,
-                payload.minAmountOut,
-                payload.nonce,
-                payload.deadline,
-                payload.twapStart,
-                payload.twapEnd,
-                payload.strategyDataHash
-            )
-        );
-        return MessageHashUtils.toTypedDataHash(domainSeparator(), structHash);
     }
 
     function _authorizeUpgrade(address) internal override onlyOwner {}
