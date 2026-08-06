@@ -2,7 +2,7 @@
  * FCE (Flare Compute Extension) Client
  * 
  * Calls the TEE extension to get signed rebalance payloads.
- * The TEE signs the EIP-712 payload with the fccSigner private key,
+ * The TEE signs the payload with the teeAddress private key,
  * which is required to call executeRebalance() on ParentVault.
  * 
  * Wire format matches fce-extension/src/app/abi.ts exactly.
@@ -60,6 +60,17 @@ export interface SignedRebalancePayload {
   twapEnd: bigint;
   strategyDataHash: `0x${string}`;
   signature: `0x${string}`;
+}
+
+/**
+ * Full ActionResult from TEE extension (for new executeRebalance 5-param signature)
+ */
+export interface TeeActionResult {
+  resultData: `0x${string}`;    // ABI-encoded RebalancePayload (7 fields, no signature)
+  actionId: `0x${string}`;       // bytes32 instruction ID
+  submissionTag: string;          // submission identifier
+  status: number;                 // 1 = success
+  signature: `0x${string}`;      // EIP-191 TEE signature
 }
 
 // ── Encoding helpers (matching fce-extension) ────────────────────────────
@@ -140,7 +151,7 @@ function decodeRebalancePayload(hex: `0x${string}`): SignedRebalancePayload {
  * @param request - Vault state to calculate optimal rebalance
  * @returns Signed payload ready for executeRebalance()
  */
-export async function requestSignedRebalance(request: RebalanceRequest): Promise<SignedRebalancePayload> {
+export async function requestSignedRebalance(request: RebalanceRequest): Promise<TeeActionResult> {
   const { endpoint, opType, opCommand } = FCE_CONFIG;
   
   // 1. ABI-encode the rebalance request
@@ -154,10 +165,13 @@ export async function requestSignedRebalance(request: RebalanceRequest): Promise
   };
   
   // 3. Build the Action (message is hex-encoded DataFixed JSON)
+  const submissionTag = `0x${Date.now().toString(16).padStart(64, '0')}`;
+  const actionId = `rebalance-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  
   const action: FCEAction = {
     data: {
-      id: `rebalance-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      submissionTag: `0x${Date.now().toString(16).padStart(64, '0')}`,
+      id: actionId,
+      submissionTag,
       message: bytesToHex(new TextEncoder().encode(JSON.stringify(dataFixed))),
     },
   };
@@ -189,7 +203,7 @@ export async function requestSignedRebalance(request: RebalanceRequest): Promise
   console.log('[FCE] Version:', result.version);
   console.log('[FCE] Log:', result.log);
   
-  // 6. Decode the signed payload
+  // 6. Decode the signed payload to extract signature
   const payload = decodeRebalancePayload(result.data as `0x${string}`);
   
   // 7. Validate signature
@@ -201,7 +215,28 @@ export async function requestSignedRebalance(request: RebalanceRequest): Promise
   console.log('[FCE] Nonce:', payload.nonce.toString());
   console.log('[FCE] Signature length:', payload.signature.length, 'chars');
   
-  return payload;
+  // 8. Encode resultData (RebalancePayload without signature) for executeRebalance
+  const resultData = encodeAbiParameters(
+    parseAbiParameters('address newStrategy, uint256 minAmountOut, uint256 nonce, uint256 deadline, uint256 twapStart, uint256 twapEnd, bytes32 strategyDataHash'),
+    [
+      payload.newStrategy,
+      payload.minAmountOut,
+      payload.nonce,
+      payload.deadline,
+      payload.twapStart,
+      payload.twapEnd,
+      payload.strategyDataHash,
+    ]
+  );
+  
+  // 9. Return full TeeActionResult for new 5-param executeRebalance
+  return {
+    resultData,
+    actionId: action.data.id as `0x${string}`,
+    submissionTag: action.data.submissionTag,
+    status: result.status,
+    signature: payload.signature,
+  };
 }
 
 /**

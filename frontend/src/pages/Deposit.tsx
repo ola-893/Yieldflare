@@ -6,7 +6,7 @@ import {Lock, RefreshCw, Check, ArrowRight, Copy, Clock, AlertCircle, Coins, Shi
 import xrpImg from '../assets/images/xrp.webp';
 import btcImg from '../assets/images/btc.webp';
 import {CONTRACTS, FASSET_ADAPTER_ABI, ASSET_MANAGER_ABI, MINTING_TAG_MANAGER_ABI, PARENT_VAULT_ABI} from '../config/contracts';
-import {requestSignedRebalance, checkFceHealth} from '../services/fceClient';
+import {requestSignedRebalance, checkFceHealth, type TeeActionResult} from '../services/fceClient';
 
 type DepositFlow = 'FASSET' | 'ERC4626';
 type FassetStep = 'SELECT' | 'RESERVE_TAG' | 'AWAITING_DEPOSIT' | 'READY_TO_SETTLE' | 'SETTLING' | 'DEPLOY' | 'COMPLETE';
@@ -230,7 +230,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   };
 
   // Write: Execute rebalance to deploy idle capital to strategy
-  const {writeContract: executeRebalance, data: rebalanceHash, isPending: isRebalancing, error: rebalanceError} = useWriteContract();
+  const {writeContract: writeRebalance, data: rebalanceHash, isPending: isRebalancing, error: rebalanceError} = useWriteContract();
   const {isLoading: isRebalanceConfirming, error: rebalanceReceiptError} = useWaitForTransactionReceipt({hash: rebalanceHash});
 
   const [isRequestingSignature, setIsRequestingSignature] = useState(false);
@@ -277,22 +277,30 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
       }
 
       // 2. Request signed rebalance payload from TEE
-      const signedPayload = await requestSignedRebalance({
+      const teeResult: TeeActionResult = await requestSignedRebalance({
         vaultAddress: CONTRACTS.parentVault,
         idleAssets: xrplAmount ? BigInt(Math.floor(parseFloat(xrplAmount) * 1e6)) : 0n,
         approvedStrategies: [CONTRACTS.strategies.enosysFxrp],
         liquidityBufferBps: 1000, // 10% buffer
       });
 
-      console.log('[Deploy] Signed payload received, submitting to chain...');
+      console.log('[Deploy] TEE result received, submitting to chain...');
+      console.log('[Deploy] Action ID:', teeResult.actionId);
+      console.log('[Deploy] Status:', teeResult.status);
 
-      // 3. Submit signed payload to executeRebalance()
+      // 3. Submit to executeRebalance() with 5-param signature
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      executeRebalance({
+      writeRebalance({
         address: CONTRACTS.parentVault,
         abi: PARENT_VAULT_ABI as any,
         functionName: 'executeRebalance',
-        args: [signedPayload],
+        args: [
+          teeResult.resultData,       // bytes: ABI-encoded RebalancePayload
+          teeResult.actionId,          // bytes32: instruction ID
+          teeResult.submissionTag,     // string: submission identifier
+          teeResult.status,            // uint8: 1 = success
+          teeResult.signature,         // bytes: EIP-191 TEE signature
+        ],
       } as any);
 
       setIsRequestingSignature(false);
@@ -502,18 +510,25 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
         throw new Error('TEE extension not available. Auto-deploy skipped.');
       }
 
-      const signedPayload = await requestSignedRebalance({
+      const teeResult: TeeActionResult = await requestSignedRebalance({
         vaultAddress: CONTRACTS.parentVault,
         idleAssets: xrplAmount ? BigInt(Math.floor(parseFloat(xrplAmount) * 1e6)) : 0n,
         approvedStrategies: [CONTRACTS.strategies.enosysFxrp],
         liquidityBufferBps: 1000,
       });
 
-      executeRebalance({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      writeRebalance({
         address: CONTRACTS.parentVault,
         abi: PARENT_VAULT_ABI as any,
         functionName: 'executeRebalance',
-        args: [signedPayload],
+        args: [
+          teeResult.resultData,
+          teeResult.actionId,
+          teeResult.submissionTag,
+          teeResult.status,
+          teeResult.signature,
+        ],
       } as any);
 
       localStorage.removeItem('flux-auto-deploy');

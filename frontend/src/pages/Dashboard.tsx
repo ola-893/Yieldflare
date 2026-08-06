@@ -191,6 +191,35 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
     query: {enabled: isFxrpDeployed},
   });
 
+  // FCE Integration reads
+  const {data: fxrpInstructionSender} = useReadContract({
+    address: FXRP_VAULT_ADDRESS,
+    abi: PARENT_VAULT_ABI,
+    functionName: 'instructionSender',
+    query: {enabled: isFxrpDeployed},
+  });
+
+  const {data: fxrpTeeAddress} = useReadContract({
+    address: FXRP_VAULT_ADDRESS,
+    abi: PARENT_VAULT_ABI,
+    functionName: 'teeAddress',
+    query: {enabled: isFxrpDeployed},
+  });
+
+  const {data: fxrpRebalanceThreshold} = useReadContract({
+    address: FXRP_VAULT_ADDRESS,
+    abi: PARENT_VAULT_ABI,
+    functionName: 'rebalanceThreshold',
+    query: {enabled: isFxrpDeployed},
+  });
+
+  const {data: fxrpLastInstructionId} = useReadContract({
+    address: FXRP_VAULT_ADDRESS,
+    abi: PARENT_VAULT_ABI,
+    functionName: 'lastInstructionId',
+    query: {enabled: isFxrpDeployed},
+  });
+
   // Read strategy adapter's totalValue for yield calculation
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const {data: strategyTotalValue, refetch: refetchStrategyValue} = useReadContract({
@@ -451,6 +480,11 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
                 <p>Active Strategy: <span className="text-[#E1BAC2]">{fxrpActiveStrategy ?? 'undefined'}</span></p>
                 <p>Decimals: <span className="text-[#E1BAC2]">{fxrpDecimals?.toString() ?? 'undefined'}</span></p>
                 <p>Connected: <span className="text-[#E1BAC2]">{address ?? 'none'}</span></p>
+                <p className="mt-2 text-white/60">FCE Integration</p>
+                <p>Instruction Sender: <span className="text-[#E1BAC2]">{fxrpInstructionSender ? `${(fxrpInstructionSender as string).slice(0, 8)}...` : 'not set'}</span></p>
+                <p>TEE Address: <span className="text-[#E1BAC2]">{fxrpTeeAddress ? `${(fxrpTeeAddress as string).slice(0, 8)}...` : 'not set'}</span></p>
+                <p>Rebalance Threshold: <span className="text-[#E1BAC2]">{fxrpRebalanceThreshold?.toString() ?? '0'}</span></p>
+                <p>Last Instruction: <span className="text-[#E1BAC2]">{fxrpLastInstructionId ? `${(fxrpLastInstructionId as string).slice(0, 10)}...` : 'none'}</span></p>
               </div>
               <div>
                 <p className="text-white/60 mb-1">Calculated Values</p>
@@ -646,6 +680,25 @@ export const Dashboard: React.FC<DashboardProps> = ({onNavigateToDeposit, onNavi
                     <p className="text-[10px] font-mono text-[#4A4A4A] uppercase tracking-wider mb-1">Rebalances</p>
                     <p className="text-sm font-bold text-[#1E1E1E]">{fxrpRebalanceNonce?.toString() ?? '0'}</p>
                   </div>
+                </div>
+
+                {/* FCE Config Status */}
+                <div className="p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10 mb-4">
+                  <div className="flex items-center justify-between">
+                    <p className="text-[10px] font-mono text-[#4A4A4A] uppercase tracking-wider">FCE Config</p>
+                    <div className={`flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-mono font-bold ${
+                      fxrpInstructionSender && fxrpInstructionSender !== '0x0000000000000000000000000000000000000000'
+                        ? 'bg-emerald-500/10 text-emerald-600'
+                        : 'bg-amber-500/10 text-amber-600'
+                    }`}>
+                      {fxrpInstructionSender && fxrpInstructionSender !== '0x0000000000000000000000000000000000000000' ? 'Configured' : 'Not Set'}
+                    </div>
+                  </div>
+                  {fxrpRebalanceThreshold && fxrpRebalanceThreshold > 0n && (
+                    <p className="text-[10px] text-[#4A4A4A] mt-1">
+                      Auto-deploy threshold: {formatUnits(fxrpRebalanceThreshold, decimals)} FXRP
+                    </p>
+                  )}
                 </div>
 
                 {/* Amount in Strategy */}
