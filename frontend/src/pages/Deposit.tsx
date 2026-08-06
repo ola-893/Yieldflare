@@ -114,8 +114,9 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const {writeContract: registerTag, data: registerHash, isPending: isRegistering, error: registerError} = useWriteContract();
   const {isLoading: isRegisterConfirming, data: registerReceipt, error: registerReceiptError} = useWaitForTransactionReceipt({hash: registerHash});
 
-  const {writeContract: settleMint, data: settleHash, isPending: isSettling} = useWriteContract();
-  const {isLoading: isSettleConfirming} = useWaitForTransactionReceipt({hash: settleHash});
+  const {writeContract: settleMint, data: settleHash, isPending: isSettling, error: settleError} = useWriteContract();
+  const {isLoading: isSettleConfirming, data: settleReceipt} = useWaitForTransactionReceipt({hash: settleHash});
+  const [settleFailed, setSettleFailed] = useState<string | null>(null);
 
   const {data: reservationFeeRaw, isLoading: isFeeLoading, error: feeError} = useReadContract({
     address: CONTRACTS.mintingTagManager,
@@ -186,10 +187,17 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
 
   useEffect(() => {
     if (settleHash && !isSettleConfirming) {
-      setStep('DEPLOY');
-      saveState('DEPLOY');
+      if (settleReceipt?.status === 'success') {
+        setStep('DEPLOY');
+        saveState('DEPLOY');
+        setSettleFailed(null);
+      } else {
+        // Transaction reverted — stay on READY_TO_SETTLE so user can retry
+        setSettleFailed(settleReceipt ? 'Transaction was mined but reverted on-chain.' : 'Transaction failed or was rejected.');
+        setStep('READY_TO_SETTLE');
+      }
     }
-  }, [settleHash, isSettleConfirming]);
+  }, [settleHash, isSettleConfirming, settleReceipt]);
 
   const handleReserveTag = () => {
     if (existingTags.length > 0) {
@@ -732,6 +740,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
               asset={asset}
               onSettle={handleSettle}
               isSettling={isSettling || isSettleConfirming}
+              error={settleFailed || settleError?.message || null}
             />
           )}
 
@@ -1126,23 +1135,31 @@ const StepReadyToSettle: React.FC<{
   asset: 'XRP' | 'BTC';
   onSettle: () => void;
   isSettling: boolean;
-}> = ({depositId, xrplTxHash, xrplAmount, asset, onSettle, isSettling}) => {
+  error?: string | null;
+}> = ({depositId, xrplTxHash, xrplAmount, asset, onSettle, isSettling, error}) => {
   const xrplExplorerUrl = xrplTxHash ? `https://testnet.xrpl.org/transactions/${xrplTxHash}` : null;
+  const hasError = !!error;
 
   return (
     <motion.div
       initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
-      className="glass-panel p-6 sm:p-8 rounded-3xl border border-emerald-500/30 shadow-soft-editorial bg-white/60"
+      className={`glass-panel p-6 sm:p-8 rounded-3xl shadow-soft-editorial bg-white/60 ${hasError ? 'border border-amber-400/40' : 'border border-emerald-500/30'}`}
     >
       <div className="text-center mb-8">
-        <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
-          <Check className="w-8 h-8 text-emerald-600" />
+        <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${hasError ? 'bg-amber-500/10 border border-amber-400/30' : 'bg-emerald-500/10 border border-emerald-500/30'}`}>
+          {hasError ? (
+            <AlertCircle className="w-8 h-8 text-amber-600" />
+          ) : (
+            <Check className="w-8 h-8 text-emerald-600" />
+          )}
         </div>
         <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
-          FAssets received!
+          {hasError ? 'Settlement Failed' : 'FAssets received!'}
         </h3>
         <p className="text-xs text-[#4A4A4A]">
-          Your deposit has been processed. Click below to settle and receive your Flux tokens.
+          {hasError
+            ? 'The settlement transaction could not be completed. You can safely retry — your funds are still in the adapter.'
+            : 'Your deposit has been processed. Click below to settle and receive your Flux tokens.'}
         </p>
       </div>
 
@@ -1167,6 +1184,19 @@ const StepReadyToSettle: React.FC<{
         )}
       </div>
 
+      {error && (
+        <div className="p-3 rounded-xl bg-red-50 border border-red-200 mb-6">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-xs text-red-700 font-bold">Settlement Failed</p>
+              <p className="text-[10px] text-red-600 font-mono mt-1 break-all">{error}</p>
+              <p className="text-[10px] text-red-600 mt-1">You can safely retry — your funds are still in the adapter.</p>
+            </div>
+          </div>
+        </div>
+      )}
+
       <button
         onClick={onSettle} disabled={isSettling}
         className="w-full py-3.5 rounded-full bg-emerald-600 text-white text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-emerald-700 transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
@@ -1174,7 +1204,7 @@ const StepReadyToSettle: React.FC<{
         {isSettling ? (
           <><RefreshCw className="w-4 h-4 animate-spin" /><span>Settling Deposit...</span></>
         ) : (
-          <><span>Settle & Receive Shares</span><ArrowRight className="w-4 h-4" /></>
+          <><span>{error ? 'Retry Settlement' : 'Settle & Receive Shares'}</span><ArrowRight className="w-4 h-4" /></>
         )}
       </button>
     </motion.div>

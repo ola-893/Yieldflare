@@ -5,14 +5,16 @@
   "description": "FlareYield Manager — Root workspace runner for Frontend and Off-chain Executor Service",
   "workspaces": [
     "frontend",
-    "executor"
+    "executor",
+    "fce-extension"
   ],
   "scripts": {
     "postinstall": "npm run install:all",
-    "install:all": "npm install --prefix frontend && npm install --prefix executor",
-    "start": "npx -y concurrently -n \"FRONTEND,EXECUTOR\" -c \"cyan,magenta\" \"npm run dev --prefix frontend\" \"npm start --prefix executor\"",
+    "install:all": "npm install --prefix frontend && npm install --prefix executor && npm install --prefix fce-extension && npm run build --prefix fce-extension",
+    "start": "npx -y concurrently -n \"FRONTEND,EXECUTOR,FCE-EXT,NGROK\" -c \"cyan,magenta,green,yellow\" \"npm run dev --prefix frontend\" \"npm start --prefix executor\" \"npm start --prefix fce-extension\" \"ngrok http 8080 --log=stdout\"",
     "dev": "npm start",
     "frontend": "npm run dev --prefix frontend",
-    "executor": "npm start --prefix executor"
+    "executor": "npm start --prefix executor",
+    "fce-extension": "npm start --prefix fce-extension"
   }
 }
