@@ -117,6 +117,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const {writeContract: settleMint, data: settleHash, isPending: isSettling, error: settleError} = useWriteContract();
   const {isLoading: isSettleConfirming, data: settleReceipt} = useWaitForTransactionReceipt({hash: settleHash});
   const [settleFailed, setSettleFailed] = useState<string | null>(null);
+  const [wasSettling, setWasSettling] = useState(false);
 
   const {data: reservationFeeRaw, isLoading: isFeeLoading, error: feeError} = useReadContract({
     address: CONTRACTS.mintingTagManager,
@@ -196,8 +197,24 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
         setSettleFailed(settleReceipt ? 'Transaction was mined but reverted on-chain.' : 'Transaction failed or was rejected.');
         setStep('READY_TO_SETTLE');
       }
+      setWasSettling(false);
     }
   }, [settleHash, isSettleConfirming, settleReceipt]);
+
+  // Detect wallet rejection: isSettling went true→false without a hash being set
+  useEffect(() => {
+    if (wasSettling && !isSettling && !settleHash && step === 'SETTLING') {
+      // User rejected the transaction in their wallet
+      setSettleFailed('Transaction was rejected in your wallet.');
+      setStep('READY_TO_SETTLE');
+      setWasSettling(false);
+    }
+  }, [isSettling, settleHash, wasSettling, step]);
+
+  // Track when settling begins
+  useEffect(() => {
+    if (isSettling) setWasSettling(true);
+  }, [isSettling]);
 
   const handleReserveTag = () => {
     if (existingTags.length > 0) {
@@ -745,7 +762,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
           )}
 
           {depositFlow === 'FASSET' && step === 'SETTLING' && (
-            <StepSettling key="settling" />
+            <StepSettling key="settling" onBack={() => { setStep('READY_TO_SETTLE'); setSettleFailed(null); }} />
           )}
 
           {depositFlow === 'FASSET' && step === 'DEPLOY' && (
@@ -1212,7 +1229,7 @@ const StepReadyToSettle: React.FC<{
 };
 
 // ─── FAsset Step: Settling ──────────────────────────────────────────────────
-const StepSettling: React.FC = () => (
+const StepSettling: React.FC<{onBack: () => void}> = ({onBack}) => (
   <motion.div
     initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
     className="glass-panel p-8 rounded-3xl border border-[#1E1E1E]/15 shadow-soft-editorial bg-white/60 text-center"
@@ -1223,9 +1240,15 @@ const StepSettling: React.FC = () => (
     <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
       Settling your deposit
     </h3>
-    <p className="text-xs text-[#4A4A4A]">
+    <p className="text-xs text-[#4A4A4A] mb-6">
       Transferring FAssets to the ParentVault and minting your Flux tokens...
     </p>
+    <button
+      onClick={onBack}
+      className="py-2.5 px-5 rounded-full border border-[#1E1E1E]/20 text-[#4A4A4A] text-[10px] font-bold uppercase tracking-[0.15em] hover:border-[#E1BAC2] hover:text-[#1E1E1E] transition-all"
+    >
+      Cancel & Go Back
+    </button>
   </motion.div>
 );
 
