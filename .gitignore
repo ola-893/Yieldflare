@@ -17,3 +17,6 @@ fce-extension-scaffold/
 # Log files from start-all.sh
 *.log
 *.pid
+
+# macOS metadata
+.DS_Store
