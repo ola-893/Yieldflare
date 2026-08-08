@@ -119,3 +119,34 @@ tail -f executor.log fce-extension.log frontend.log ngrok.log
 ---
 
 **🚀 Ready? Run `./start-all.sh` and visit http://localhost:5173!**
+
+---
+
+## 🔍 Verify Correct Extension is Running
+
+After starting services, confirm the TypeScript extension (not Go default) is active:
+
+```bash
+cd fce-extension-scaffold
+docker compose -f docker-compose.yaml -f docker-compose.coston2.yaml images extension-tee
+```
+
+**Expected output should show:** `typescript/Dockerfile` or similar TypeScript build reference
+
+**If you see Go/golang references:** The wrong extension built. Check:
+1. `fce-extension-scaffold/.env` has `LANGUAGE=typescript`
+2. Restart: `./start-all.sh --stop && ./start-all.sh`
+3. Check startup logs for: `Building extension: typescript/Dockerfile`
+
+---
+
+## 📐 Architecture Note: fce-extension/ vs Docker TEE
+
+- **fce-extension/** (port 8080): Development/testing server running **outside** TEE (not attested)
+- **extension-tee** (Docker): Production TEE-attested extension with hardware attestation
+
+`start-all.sh` starts both:
+- Port 8080 = local dev server (for testing handlers without Docker)
+- Docker extension-tee = actual attested extension (what testnet uses)
+
+For testnet integration, only the Docker extension matters.

@@ -51,7 +51,7 @@ if [[ "$ACTION" == "stop" ]]; then
     if [[ -d "fce-extension-scaffold" ]]; then
         log "Stopping FCE scaffold Docker services..."
         cd fce-extension-scaffold
-        docker compose -f docker-compose.yaml -f docker-compose.coston2.yaml down 2>/dev/null || true
+        ./scripts/start-services.sh --chain coston2 2>/dev/null || docker compose -f docker-compose.yaml -f docker-compose.coston2.yaml down 2>/dev/null || true
         cd ..
     fi
     
@@ -125,9 +125,10 @@ if [[ ! -f ".env" ]]; then
     fi
 fi
 
-# Start Docker services for Coston2
+# Start Docker services for Coston2 using start-services.sh
+# This script handles language resolution, ensuring TypeScript extension builds (not Go default)
 log "Starting Docker Compose services for Coston2..."
-docker compose -f docker-compose.yaml -f docker-compose.coston2.yaml up -d
+./scripts/start-services.sh --chain coston2
 
 # Wait for services to be ready
 log "Waiting for services to initialize..."
