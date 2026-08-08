@@ -61,6 +61,10 @@ if [[ "$ACTION" == "stop" ]]; then
     pkill -f "tsx.*executor" 2>/dev/null || true
     pkill -f "tsx.*fce-extension" 2>/dev/null || true
     
+    # Stop ngrok
+    log "Stopping ngrok tunnel..."
+    pkill -f "ngrok" 2>/dev/null || true
+    
     log "✅ All services stopped"
     exit 0
 fi
@@ -159,8 +163,41 @@ cd ..
 log "✅ Executor started (PID: $EXECUTOR_PID, logs: executor.log)"
 echo ""
 
-# Step 3: Start FCE Extension Handler
-log "🔌 Step 3/4: Starting FCE Extension Handler"
+# Step 3: Start ngrok tunnel
+log "🌐 Step 3/5: Starting ngrok tunnel"
+log "  • Exposes FCE extension to external network"
+log "  • Reserved domain: trolling-affluent-parcel.ngrok-free.dev"
+
+# Check if ngrok is installed
+if ! command -v ngrok &> /dev/null; then
+    warn "⚠️  ngrok not found. Install with: brew install ngrok/ngrok/ngrok"
+    warn "⚠️  Or download from: https://ngrok.com/download"
+    warn "⚠️  Continuing without ngrok - external access will not work"
+else
+    # Check if ngrok is already running on port 8080
+    if lsof -i :4040 &>/dev/null; then
+        log "✅ ngrok already running (dashboard: http://localhost:4040)"
+    else
+        log "Starting ngrok tunnel for port 8080..."
+        ngrok http 8080 --log=stdout > ngrok.log 2>&1 &
+        NGROK_PID=$!
+        echo $NGROK_PID > ngrok.pid
+        
+        # Wait for ngrok to start
+        sleep 3
+        
+        if ps -p $NGROK_PID > /dev/null; then
+            log "✅ ngrok started (PID: $NGROK_PID, logs: ngrok.log)"
+            log "   Dashboard: http://localhost:4040"
+        else
+            warn "⚠️  ngrok failed to start - check ngrok.log"
+        fi
+    fi
+fi
+echo ""
+
+# Step 4: Start FCE Extension Handler
+log "🔌 Step 4/5: Starting FCE Extension Handler"
 log "  • Handles VAULT_REBALANCE actions from TEE"
 log "  • Signs settlement transactions"
 
@@ -173,8 +210,8 @@ cd ..
 log "✅ FCE Extension started (PID: $FCE_PID, logs: fce-extension.log)"
 echo ""
 
-# Step 4: Start Frontend
-log "🌐 Step 4/4: Starting Frontend (React UI)"
+# Step 5: Start Frontend
+log "🎨 Step 5/5: Starting Frontend (React UI)"
 log "  • Development server with hot reload"
 log "  • Will open in browser automatically"
 
@@ -203,6 +240,8 @@ echo ""
 echo -e "${BLUE}📍 Service URLs:${NC}"
 echo -e "   Frontend:        ${CYAN}http://localhost:5173${NC}"
 echo -e "   FCE Extension:   ${CYAN}http://localhost:8080${NC}"
+echo -e "   ngrok Dashboard: ${CYAN}http://localhost:4040${NC}"
+echo -e "   ngrok Public:    ${CYAN}https://trolling-affluent-parcel.ngrok-free.dev${NC}"
 echo -e "   Extension Proxy: ${CYAN}localhost:6673${NC} (internal) / ${CYAN}6674${NC} (external)"
 echo -e "   Redis:           ${CYAN}localhost:6382${NC}"
 echo ""
@@ -210,6 +249,7 @@ echo -e "${BLUE}📝 Log Files:${NC}"
 echo -e "   Executor:        ${CYAN}executor.log${NC}"
 echo -e "   FCE Extension:   ${CYAN}fce-extension.log${NC}"
 echo -e "   Frontend:        ${CYAN}frontend.log${NC}"
+echo -e "   ngrok:           ${CYAN}ngrok.log${NC}"
 echo -e "   Docker:          ${CYAN}docker compose logs -f${NC} (in fce-extension-scaffold/)"
 echo ""
 echo -e "${BLUE}🔧 Management:${NC}"

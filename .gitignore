@@ -13,3 +13,7 @@ out/
 .env
 node_modules
 fce-extension-scaffold/
+
+# Log files from start-all.sh
+*.log
+*.pid

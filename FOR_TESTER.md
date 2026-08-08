@@ -17,15 +17,23 @@ npm run install:all
 
 1. **Docker Desktop** - https://www.docker.com/products/docker-desktop
 2. **Node.js 18+** - https://nodejs.org/
-3. **MetaMask** - For wallet connection
+3. **ngrok** - https://ngrok.com/download (or `brew install ngrok/ngrok/ngrok`)
+4. **MetaMask** - For wallet connection
 
 ## 🔧 Configuration Required
 
-Before running `./start-all.sh`, you may need to update ONE file:
+Before running `./start-all.sh`, you need:
 
-**`fce-extension-scaffold/.env`**
-- Contact me for DB credentials and NGROK token
-- Or check if it's already configured
+1. **ngrok authentication** (one-time setup):
+   ```bash
+   ngrok config add-authtoken YOUR_AUTHTOKEN
+   ```
+   Get your authtoken from: https://dashboard.ngrok.com/get-started/your-authtoken
+
+2. **FCE scaffold .env** (may need updates):
+   - File: `fce-extension-scaffold/.env`
+   - Contact me for DB credentials if needed
+   - ngrok domain is already configured: `trolling-affluent-parcel.ngrok-free.dev`
 
 All other `.env` files are pre-configured for Coston2 testnet.
 
@@ -71,13 +79,16 @@ curl http://localhost:5173
 # Check FCE extension
 curl http://localhost:8080/health
 
+# Check ngrok
+curl http://localhost:4040/api/tunnels
+
 # Check Docker
 cd fce-extension-scaffold && docker compose ps
 ```
 
 **View logs in real-time:**
 ```bash
-tail -f executor.log fce-extension.log frontend.log
+tail -f executor.log fce-extension.log frontend.log ngrok.log
 ```
 
 ---

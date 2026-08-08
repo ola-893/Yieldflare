@@ -22,7 +22,13 @@ Before starting, ensure you have:
    - Download: https://nodejs.org/
    - Verify: `node --version`
 
-3. **Git** (to clone the repository)
+3. **ngrok** (for external FCE access)
+   - Download: https://ngrok.com/download
+   - Or install via Homebrew: `brew install ngrok/ngrok/ngrok`
+   - Verify: `ngrok --version`
+   - Configure: `ngrok config add-authtoken YOUR_TOKEN` (get from https://dashboard.ngrok.com/)
+
+4. **Git** (to clone the repository)
    - Verify: `git --version`
 
 ## 🚀 Quick Start (3 Steps)
@@ -89,6 +95,8 @@ That's it! After ~10 seconds, you should see:
 📍 Service URLs:
    Frontend:        http://localhost:5173
    FCE Extension:   http://localhost:8080
+   ngrok Dashboard: http://localhost:4040
+   ngrok Public:    https://trolling-affluent-parcel.ngrok-free.dev
    ...
 
 🎉 Ready to test! Visit http://localhost:5173 to start.
@@ -139,6 +147,7 @@ tail -f *.log
 tail -f executor.log      # XRPL monitoring
 tail -f fce-extension.log # FCE handler logs
 tail -f frontend.log      # Frontend dev server
+tail -f ngrok.log         # ngrok tunnel logs
 
 # Docker services (Redis, proxy, TEE node):
 cd fce-extension-scaffold
