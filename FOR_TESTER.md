@@ -1,6 +1,31 @@
 # FlareYield Manager - For Tester
 
-## 🎯 One-Command Setup
+## � VAULT RECOVERY COMPLETED - Feb 8, 2026
+
+### What Happened
+The ParentVault on Coston2 had a corrupted `activeStrategy` state (set to `0x00000000000000000000000000000003e8` instead of a valid address), which caused `totalAssets()` to revert and blocked all settlements.
+
+### Recovery Actions Taken
+1. ✅ Deployed `ParentVaultRecovery.sol` with emergency `resetActiveStrategy()` function
+2. ✅ Upgraded vault proxy to recovery implementation  
+3. ✅ Reset corrupted strategy to `address(0)`
+4. ✅ Upgraded back to original ParentVault implementation
+5. ✅ Verified functionality: `totalAssets()` = 66.175 XRP
+
+**TX Hash**: `0x7974aa940ca84f23d41286eaf1f2473ee2fdb3dc75e9c35a86105452320da700`
+
+### Current Vault Status
+- **ParentVault**: `0x01f64160E4928Eba5607aE294F9B66090Dc323B3`
+- **Active Strategy**: `address(0)` (no active strategy)
+- **Total Assets**: 66.175 XRP  
+- **Status**: ✅ **FULLY FUNCTIONAL** - Ready for deposits/withdrawals
+- **Settlement**: ✅ **NOW WORKING**
+
+**The protocol is now ready for fresh testing!**
+
+---
+
+## �🎯 One-Command Setup
 
 **Clone the repo and start everything:**
 
