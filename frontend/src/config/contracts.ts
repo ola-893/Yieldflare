@@ -55,6 +55,9 @@ export const CONTRACTS = {
   // FAssetAdapter - Direct minting integration
   fAssetAdapter: import.meta.env.VITE_FASSET_ADAPTER_ADDRESS || '0x02D4F85301A2d1b3Bcc40BfD7937e6Fb2F5224a7',
   
+  // FCE (Flare Compute Extension) - InstructionSender
+  instructionSender: import.meta.env.VITE_INSTRUCTION_SENDER_ADDRESS || '0xB4b31E86F020Cf7F1B81B35C2E2Bd2CF6DA1BE66',
+  
   // === Underlying Assets ===
   tokens: {
     // FXRP Token (Flare-wrapped XRP)
@@ -119,6 +122,13 @@ export const PARENT_VAULT_ABI = [
   {type:'function',name:'rebalanceNonce',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint256'}]},
   {type:'function',name:'liquidityBufferBps',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint16'}]},
   {type:'function',name:'fccSigner',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
+  // FCE Integration
+  {type:'function',name:'teeAddress',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
+  {type:'function',name:'instructionSender',stateMutability:'view',inputs:[],outputs:[{name:'',type:'address'}]},
+  {type:'function',name:'rebalanceThreshold',stateMutability:'view',inputs:[],outputs:[{name:'',type:'uint256'}]},
+  {type:'function',name:'lastInstructionId',stateMutability:'view',inputs:[],outputs:[{name:'',type:'bytes32'}]},
+  {type:'function',name:'requestRebalance',stateMutability:'nonpayable',inputs:[],outputs:[]},
+  {type:'function',name:'executeRebalance',stateMutability:'nonpayable',inputs:[{name:'resultData',type:'bytes'},{name:'actionId',type:'bytes32'},{name:'submissionTag',type:'string'},{name:'status',type:'uint8'},{name:'signature',type:'bytes'}],outputs:[]},
   // Events
   {type:'event',name:'Deposit',inputs:[{name:'sender',type:'address',indexed:true},{name:'owner',type:'address',indexed:true},{name:'assets',type:'uint256',indexed:false},{name:'shares',type:'uint256',indexed:false}]},
   {type:'event',name:'Withdraw',inputs:[{name:'sender',type:'address',indexed:true},{name:'receiver',type:'address',indexed:true},{name:'owner',type:'address',indexed:true},{name:'assets',type:'uint256',indexed:false},{name:'shares',type:'uint256',indexed:false}]},

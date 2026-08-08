@@ -108,7 +108,7 @@ export function decodeRebalanceRequest(hex: `0x${string}`): RebalanceRequest {
   return {
     vaultAddress: decoded[0],
     idleAssets: decoded[1],
-    approvedStrategies: decoded[2],
+    approvedStrategies: decoded[2] as `0x${string}`[],
     liquidityBufferBps: Number(decoded[3]),
   };
 }

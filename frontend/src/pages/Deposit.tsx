@@ -6,7 +6,7 @@ import {Lock, RefreshCw, Check, ArrowRight, Copy, Clock, AlertCircle, Coins, Shi
 import xrpImg from '../assets/images/xrp.webp';
 import btcImg from '../assets/images/btc.webp';
 import {CONTRACTS, FASSET_ADAPTER_ABI, ASSET_MANAGER_ABI, MINTING_TAG_MANAGER_ABI, PARENT_VAULT_ABI} from '../config/contracts';
-import {requestSignedRebalance, checkFceHealth, type ExecuteRebalanceParams} from '../services/fceClient';
+import {requestSignedRebalance, checkFceHealth, type TeeActionResult} from '../services/fceClient';
 
 type DepositFlow = 'FASSET' | 'ERC4626';
 type FassetStep = 'SELECT' | 'RESERVE_TAG' | 'AWAITING_DEPOSIT' | 'READY_TO_SETTLE' | 'SETTLING' | 'DEPLOY' | 'COMPLETE';
@@ -115,9 +115,11 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const {isLoading: isRegisterConfirming, data: registerReceipt, error: registerReceiptError} = useWaitForTransactionReceipt({hash: registerHash});
 
   const {writeContract: settleMint, data: settleHash, isPending: isSettling, error: settleError} = useWriteContract();
-  const {isLoading: isSettleConfirming, error: settleReceiptError} = useWaitForTransactionReceipt({hash: settleHash});
+  const {isLoading: isSettleConfirming, data: settleReceipt, error: settleReceiptError} = useWaitForTransactionReceipt({hash: settleHash});
+  const [settleFailed, setSettleFailed] = useState<string | null>(null);
+  const [wasSettling, setWasSettling] = useState(false);
   
-  // Decode settlement errors
+  // Decode settlement errors (combines both local and upstream error handling)
   const [settlementErrorMessage, setSettlementErrorMessage] = useState<string | null>(null);
   
   useEffect(() => {
@@ -135,6 +137,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
       } else {
         setSettlementErrorMessage(errorMsg.slice(0, 200));
       }
+      setSettleFailed(errorMsg.slice(0, 200));
     }
   }, [settleError, settleReceiptError]);
 
@@ -207,10 +210,33 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
 
   useEffect(() => {
     if (settleHash && !isSettleConfirming) {
-      setStep('DEPLOY');
-      saveState('DEPLOY');
+      if (settleReceipt?.status === 'success') {
+        setStep('DEPLOY');
+        saveState('DEPLOY');
+        setSettleFailed(null);
+      } else {
+        // Transaction reverted — stay on READY_TO_SETTLE so user can retry
+        setSettleFailed(settleReceipt ? 'Transaction was mined but reverted on-chain.' : 'Transaction failed or was rejected.');
+        setStep('READY_TO_SETTLE');
+      }
+      setWasSettling(false);
     }
-  }, [settleHash, isSettleConfirming]);
+  }, [settleHash, isSettleConfirming, settleReceipt]);
+
+  // Detect wallet rejection: isSettling went true→false without a hash being set
+  useEffect(() => {
+    if (wasSettling && !isSettling && !settleHash && step === 'SETTLING') {
+      // User rejected the transaction in their wallet
+      setSettleFailed('Transaction was rejected in your wallet.');
+      setStep('READY_TO_SETTLE');
+      setWasSettling(false);
+    }
+  }, [isSettling, settleHash, wasSettling, step]);
+
+  // Track when settling begins
+  useEffect(() => {
+    if (isSettling) setWasSettling(true);
+  }, [isSettling]);
 
   const handleReserveTag = () => {
     if (existingTags.length > 0) {
@@ -257,7 +283,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   };
 
   // Write: Execute rebalance to deploy idle capital to strategy
-  const {writeContract: executeRebalance, data: rebalanceHash, isPending: isRebalancing, error: rebalanceError} = useWriteContract();
+  const {writeContract: writeRebalance, data: rebalanceHash, isPending: isRebalancing, error: rebalanceError} = useWriteContract();
   const {isLoading: isRebalanceConfirming, error: rebalanceReceiptError} = useWaitForTransactionReceipt({hash: rebalanceHash});
 
   const [isRequestingSignature, setIsRequestingSignature] = useState(false);
@@ -303,23 +329,31 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
         throw new Error('TEE extension is not available. Please ensure the FCE extension is running on port 8080.');
       }
 
-      // 2. Request signed rebalance payload from TEE (returns unbundled params)
-      const params: ExecuteRebalanceParams = await requestSignedRebalance({
+      // 2. Request signed rebalance payload from TEE
+      const teeResult: TeeActionResult = await requestSignedRebalance({
         vaultAddress: CONTRACTS.parentVault,
         idleAssets: xrplAmount ? BigInt(Math.floor(parseFloat(xrplAmount) * 1e6)) : 0n,
         approvedStrategies: [CONTRACTS.strategies.enosysFxrp],
         liquidityBufferBps: 1000, // 10% buffer
       });
 
-      console.log('[Deploy] Signed params received, submitting to chain...');
+      console.log('[Deploy] TEE result received, submitting to chain...');
+      console.log('[Deploy] Action ID:', teeResult.actionId);
+      console.log('[Deploy] Status:', teeResult.status);
 
-      // 3. Submit 5 separate params to executeRebalance(resultData, actionId, submissionTag, status, signature)
+      // 3. Submit to executeRebalance() with 5-param signature
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      executeRebalance({
+      writeRebalance({
         address: CONTRACTS.parentVault,
         abi: PARENT_VAULT_ABI as any,
         functionName: 'executeRebalance',
-        args: [params.resultData, params.actionId, params.submissionTag, params.status, params.signature],
+        args: [
+          teeResult.resultData,       // bytes: ABI-encoded RebalancePayload
+          teeResult.actionId,          // bytes32: instruction ID
+          teeResult.submissionTag,     // string: submission identifier
+          teeResult.status,            // uint8: 1 = success
+          teeResult.signature,         // bytes: EIP-191 TEE signature
+        ],
       } as any);
 
       setIsRequestingSignature(false);
@@ -538,18 +572,25 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
         throw new Error('TEE extension not available. Auto-deploy skipped.');
       }
 
-      const params = await requestSignedRebalance({
+      const teeResult = await requestSignedRebalance({
         vaultAddress: CONTRACTS.parentVault,
         idleAssets: xrplAmount ? BigInt(Math.floor(parseFloat(xrplAmount) * 1e6)) : 0n,
         approvedStrategies: [CONTRACTS.strategies.enosysFxrp],
         liquidityBufferBps: 1000,
       });
 
-      executeRebalance({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      writeRebalance({
         address: CONTRACTS.parentVault,
         abi: PARENT_VAULT_ABI as any,
         functionName: 'executeRebalance',
-        args: [params.resultData, params.actionId, params.submissionTag, params.status, params.signature],
+        args: [
+          teeResult.resultData,
+          teeResult.actionId,
+          teeResult.submissionTag,
+          teeResult.status,
+          teeResult.signature,
+        ],
       } as any);
 
       localStorage.removeItem('flux-auto-deploy');
@@ -756,11 +797,12 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
               isDepositProcessedOnChain={isDepositProcessedOnChain}
               isPendingDirectMintLoading={isPendingDirectMintLoading}
               settlementError={settlementErrorMessage}
+              error={settleFailed || settleError?.message || null}
             />
           )}
 
           {depositFlow === 'FASSET' && step === 'SETTLING' && (
-            <StepSettling key="settling" />
+            <StepSettling key="settling" onBack={() => { setStep('READY_TO_SETTLE'); setSettleFailed(null); }} />
           )}
 
           {depositFlow === 'FASSET' && step === 'DEPLOY' && (
@@ -1153,8 +1195,10 @@ const StepReadyToSettle: React.FC<{
   isDepositProcessedOnChain: boolean;
   isPendingDirectMintLoading: boolean;
   settlementError?: string | null;
-}> = ({depositId, xrplTxHash, xrplAmount, asset, onSettle, isSettling, isDepositProcessedOnChain, isPendingDirectMintLoading, settlementError}) => {
+  error?: string | null;
+}> = ({depositId, xrplTxHash, xrplAmount, asset, onSettle, isSettling, isDepositProcessedOnChain, isPendingDirectMintLoading, settlementError, error}) => {
   const xrplExplorerUrl = xrplTxHash ? `https://testnet.xrpl.org/transactions/${xrplTxHash}` : null;
+  const hasError = !!error;
 
   // Show "Awaiting Executor Processing" state if deposit not yet processed on-chain
   const isWaitingForExecutor = !isDepositProcessedOnChain;
@@ -1162,27 +1206,29 @@ const StepReadyToSettle: React.FC<{
   return (
     <motion.div
       initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
-      className="glass-panel p-6 sm:p-8 rounded-3xl border border-emerald-500/30 shadow-soft-editorial bg-white/60"
+      className={`glass-panel p-6 sm:p-8 rounded-3xl shadow-soft-editorial bg-white/60 ${hasError ? 'border border-amber-400/40' : 'border border-emerald-500/30'}`}
     >
       <div className="text-center mb-8">
         <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
-          isWaitingForExecutor 
-            ? 'bg-amber-500/10 border border-amber-500/30' 
-            : 'bg-emerald-500/10 border border-emerald-500/30'
+          hasError ? 'bg-red-500/10 border border-red-400/30' : isWaitingForExecutor ? 'bg-amber-500/10 border border-amber-500/30' : 'bg-emerald-500/10 border border-emerald-500/30'
         }`}>
-          {isWaitingForExecutor ? (
+          {hasError ? (
+            <AlertCircle className="w-8 h-8 text-red-600" />
+          ) : isWaitingForExecutor ? (
             <Clock className="w-8 h-8 text-amber-600 animate-pulse" />
           ) : (
             <Check className="w-8 h-8 text-emerald-600" />
           )}
         </div>
         <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
-          {isWaitingForExecutor ? 'Awaiting Executor Processing...' : 'FAssets received!'}
+          {hasError ? 'Settlement Failed' : isWaitingForExecutor ? 'Awaiting Executor Processing...' : 'FAssets received!'}
         </h3>
         <p className="text-xs text-[#4A4A4A]">
-          {isWaitingForExecutor 
-            ? 'The executor is processing your XRPL deposit on-chain. This usually takes 15-30 seconds...' 
-            : 'Your deposit has been processed. Click below to settle and receive your Flux tokens.'}
+          {hasError
+            ? 'The settlement transaction could not be completed. You can safely retry — your funds are still in the adapter.'
+            : isWaitingForExecutor
+              ? 'The executor is processing your XRPL deposit on-chain. This usually takes 15-30 seconds...'
+              : 'Your deposit has been processed. Click below to settle and receive your Flux tokens.'}
         </p>
       </div>
 
@@ -1219,12 +1265,15 @@ const StepReadyToSettle: React.FC<{
         )}
       </div>
 
-      {settlementError && (
-        <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 flex items-start gap-2">
-          <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
-          <div className="text-xs text-red-800">
-            <div className="font-bold">Settlement Failed</div>
-            <div className="mt-1 text-[10px]">{settlementError}</div>
+      {(error || settlementError) && (
+        <div className="p-3 rounded-xl bg-red-50 border border-red-200 mb-6">
+          <div className="flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 shrink-0" />
+            <div>
+              <p className="text-xs text-red-700 font-bold">Settlement Failed</p>
+              <p className="text-[10px] text-red-600 font-mono mt-1 break-all">{error || settlementError}</p>
+              <p className="text-[10px] text-red-600 mt-1">You can safely retry — your funds are still in the adapter.</p>
+            </div>
           </div>
         </div>
       )}
@@ -1239,7 +1288,7 @@ const StepReadyToSettle: React.FC<{
         ) : isWaitingForExecutor ? (
           <><RefreshCw className="w-4 h-4 animate-spin" /><span>Awaiting Executor...</span></>
         ) : (
-          <><span>Settle & Receive Shares</span><ArrowRight className="w-4 h-4" /></>
+          <><span>{error ? 'Retry Settlement' : 'Settle & Receive Shares'}</span><ArrowRight className="w-4 h-4" /></>
         )}
       </button>
 
@@ -1253,7 +1302,7 @@ const StepReadyToSettle: React.FC<{
 };
 
 // ─── FAsset Step: Settling ──────────────────────────────────────────────────
-const StepSettling: React.FC = () => (
+const StepSettling: React.FC<{onBack: () => void}> = ({onBack}) => (
   <motion.div
     initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
     className="glass-panel p-8 rounded-3xl border border-[#1E1E1E]/15 shadow-soft-editorial bg-white/60 text-center"
@@ -1264,9 +1313,15 @@ const StepSettling: React.FC = () => (
     <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
       Settling your deposit
     </h3>
-    <p className="text-xs text-[#4A4A4A]">
+    <p className="text-xs text-[#4A4A4A] mb-6">
       Transferring FAssets to the ParentVault and minting your Flux tokens...
     </p>
+    <button
+      onClick={onBack}
+      className="py-2.5 px-5 rounded-full border border-[#1E1E1E]/20 text-[#4A4A4A] text-[10px] font-bold uppercase tracking-[0.15em] hover:border-[#E1BAC2] hover:text-[#1E1E1E] transition-all"
+    >
+      Cancel & Go Back
+    </button>
   </motion.div>
 );
 
