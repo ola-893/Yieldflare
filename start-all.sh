@@ -100,71 +100,78 @@ fi
 log "✅ Prerequisites OK"
 echo ""
 
-# Step 1: Start FCE Extension Scaffold (Docker services)
-log "📦 Step 1/4: Starting FCE Extension Scaffold (Docker)"
-log "  • Redis (port 6382)"
-log "  • Extension Proxy (ports 6673, 6674)"
-log "  • TEE Node"
+# Step 1: Start FCE Extension Scaffold (Docker services) - Optional
+log "📦 Step 1/5: Starting FCE Extension Scaffold (Docker)"
 
-if [[ ! -d "fce-extension-scaffold" ]]; then
-    die "fce-extension-scaffold directory not found"
-fi
+if [[ -d "fce-extension-scaffold" ]]; then
+    log "  • Redis (port 6382)"
+    log "  • Extension Proxy (ports 6673, 6674)"
+    log "  • TEE Node"
 
-cd fce-extension-scaffold
+    cd fce-extension-scaffold
 
-# Check if .env exists
-if [[ ! -f ".env" ]]; then
-    warn ".env file not found in fce-extension-scaffold/"
-    warn "Creating from .env.example..."
-    if [[ -f ".env.example" ]]; then
-        cp .env.example .env
-        warn "⚠️  Please configure fce-extension-scaffold/.env before continuing"
-        die "Configuration required"
-    else
-        die ".env.example not found"
+    # Check if .env exists
+    if [[ ! -f ".env" ]]; then
+        warn ".env file not found in fce-extension-scaffold/"
+        warn "Creating from .env.example..."
+        if [[ -f ".env.example" ]]; then
+            cp .env.example .env
+            warn "⚠️  Please configure fce-extension-scaffold/.env before continuing"
+            die "Configuration required"
+        else
+            die ".env.example not found"
+        fi
     fi
-fi
 
-# Start Docker services for Coston2
-log "Starting Docker Compose services for Coston2..."
-docker compose -f docker-compose.yaml -f docker-compose.coston2.yaml up -d
+    # Start Docker services for Coston2
+    log "Starting Docker Compose services for Coston2..."
+    docker compose -f docker-compose.yaml -f docker-compose.coston2.yaml up -d
 
-# Wait for services to be ready
-log "Waiting for services to initialize..."
-sleep 5
+    # Wait for services to be ready
+    log "Waiting for services to initialize..."
+    sleep 5
 
-# Check if Redis is responding
-if docker compose exec -T redis redis-cli ping &>/dev/null; then
-    log "✅ Redis ready"
+    # Check if Redis is responding
+    if docker compose exec -T redis redis-cli ping &>/dev/null; then
+        log "✅ Redis ready"
+    else
+        warn "⚠️  Redis may not be ready yet"
+    fi
+
+    cd ..
 else
-    warn "⚠️  Redis may not be ready yet"
+    warn "fce-extension-scaffold/ not found — skipping Docker services"
+    warn "FCE extension will run standalone (no TEE node)"
 fi
-
-cd ..
 echo ""
 
 # Step 2: Start Executor
-log "⚙️  Step 2/4: Starting Off-chain Executor"
+log "⚙️  Step 2/5: Starting Off-chain Executor"
 log "  • Monitors XRPL deposits"
 log "  • Calls processDirectMint() on-chain"
 
-if [[ ! -f "executor/.env" ]]; then
-    warn "⚠️  executor/.env not found - executor may fail to start"
+if [[ ! -d "executor" ]]; then
+    warn "executor/ directory not found — skipping executor"
+else
+    if [[ ! -f "executor/.env" ]]; then
+        warn "⚠️  executor/.env not found - executor may fail to start"
+    fi
+
+    # Start executor in background
+    log "Starting executor..."
+    cd executor
+    nohup npm start > ../executor.log 2>&1 &
+    EXECUTOR_PID=$!
+    disown $EXECUTOR_PID
+    echo $EXECUTOR_PID > ../executor.pid
+    cd ..
+
+    log "✅ Executor started (PID: $EXECUTOR_PID, logs: executor.log)"
 fi
-
-# Start executor in background
-log "Starting executor..."
-cd executor
-npm start > ../executor.log 2>&1 &
-EXECUTOR_PID=$!
-echo $EXECUTOR_PID > ../executor.pid
-cd ..
-
-log "✅ Executor started (PID: $EXECUTOR_PID, logs: executor.log)"
 echo ""
 
 # Step 3: Start ngrok tunnel
-log "🌐 Step 3/5: Starting ngrok tunnel"
+log "🌐 Step 3/5: Starting ngrok tunnel (optional)"
 log "  • Exposes FCE extension to external network"
 log "  • Reserved domain: trolling-affluent-parcel.ngrok-free.dev"
 
@@ -201,13 +208,18 @@ log "🔌 Step 4/5: Starting FCE Extension Handler"
 log "  • Handles VAULT_REBALANCE actions from TEE"
 log "  • Signs settlement transactions"
 
-cd fce-extension
-npm start > ../fce-extension.log 2>&1 &
-FCE_PID=$!
-echo $FCE_PID > ../fce-extension.pid
-cd ..
+if [[ ! -d "fce-extension" ]]; then
+    warn "fce-extension/ directory not found — skipping FCE extension"
+else
+    cd fce-extension
+    nohup npm start > ../fce-extension.log 2>&1 &
+    FCE_PID=$!
+    disown $FCE_PID
+    echo $FCE_PID > ../fce-extension.pid
+    cd ..
 
-log "✅ FCE Extension started (PID: $FCE_PID, logs: fce-extension.log)"
+    log "✅ FCE Extension started (PID: $FCE_PID, logs: fce-extension.log)"
+fi
 echo ""
 
 # Step 5: Start Frontend
@@ -215,17 +227,22 @@ log "🎨 Step 5/5: Starting Frontend (React UI)"
 log "  • Development server with hot reload"
 log "  • Will open in browser automatically"
 
-if [[ ! -f "frontend/.env" ]]; then
-    warn "⚠️  frontend/.env not found - frontend may use incorrect contract addresses"
+if [[ ! -d "frontend" ]]; then
+    warn "frontend/ directory not found — skipping frontend"
+else
+    if [[ ! -f "frontend/.env" ]]; then
+        warn "⚠️  frontend/.env not found - frontend may use incorrect contract addresses"
+    fi
+
+    cd frontend
+    nohup npm run dev > ../frontend.log 2>&1 &
+    FRONTEND_PID=$!
+    disown $FRONTEND_PID
+    echo $FRONTEND_PID > ../frontend.pid
+    cd ..
+
+    log "✅ Frontend started (PID: $FRONTEND_PID, logs: frontend.log)"
 fi
-
-cd frontend
-npm run dev > ../frontend.log 2>&1 &
-FRONTEND_PID=$!
-echo $FRONTEND_PID > ../frontend.pid
-cd ..
-
-log "✅ Frontend started (PID: $FRONTEND_PID, logs: frontend.log)"
 echo ""
 
 # Wait a moment for everything to initialize

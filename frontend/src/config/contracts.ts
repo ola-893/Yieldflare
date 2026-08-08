@@ -20,7 +20,9 @@ export const COSTON2_CHAIN_ID = Number(import.meta.env.VITE_CHAIN_ID) || 114;
  */
 export const FCE_CONFIG = {
   // FCE extension HTTP endpoint (for rebalance signing)
-  endpoint: import.meta.env.VITE_FCE_ENDPOINT || 'http://localhost:8080',
+  // In development, uses Vite proxy (/fce-api) to avoid CORS
+  // In production, set VITE_FCE_ENDPOINT env var to the FCE extension URL
+  endpoint: import.meta.env.VITE_FCE_ENDPOINT || '/fce-api',
   // Operation types matching fce-extension/src/app/config.ts
   opType: 'VAULT_REBALANCE',
   opCommand: 'CALCULATE_OPTIMAL',
