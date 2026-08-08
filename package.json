@@ -11,6 +11,8 @@
   "scripts": {
     "postinstall": "npm run install:all",
     "install:all": "npm install --prefix frontend && npm install --prefix executor && npm install --prefix fce-extension && npm run build --prefix fce-extension",
+    "start:all": "./start-all.sh",
+    "stop:all": "./start-all.sh --stop",
     "start": "npx -y concurrently -n \"FRONTEND,EXECUTOR,FCE-EXT,NGROK\" -c \"cyan,magenta,green,yellow\" \"npm run dev --prefix frontend\" \"npm start --prefix executor\" \"npm start --prefix fce-extension\" \"ngrok http 8080 --log=stdout\"",
     "dev": "npm start",
     "frontend": "npm run dev --prefix frontend",
