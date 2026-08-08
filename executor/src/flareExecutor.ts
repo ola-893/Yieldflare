@@ -16,7 +16,6 @@ import {
   createWalletClient,
   http,
   keccak256,
-  toBytes,
   type Address,
   type PublicClient,
   type WalletClient,
@@ -298,7 +297,13 @@ export class FlareExecutor {
 
     // ── 5. Call processDirectMint() ────────────────────────────────
 
-    const depositId = keccak256(toBytes(xrplTxHash));
+    // Validate and normalize XRPL tx hash format
+    const clean = xrplTxHash.trim().replace(/^0x/i, '');
+    if (!/^[0-9a-fA-F]{64}$/.test(clean)) {
+      throw new Error(`Malformed XRPL tx hash: ${xrplTxHash}`);
+    }
+    const depositId = keccak256(`0x${clean}`);
+    
     console.log(`${logPrefix} depositId: ${depositId}`);
     console.log(`${logPrefix} Calling processDirectMint(${destinationTag}, ${depositId}, ${observedMintedAmount})...`);
 

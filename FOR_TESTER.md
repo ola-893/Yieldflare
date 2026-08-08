@@ -1,27 +1,47 @@
 # FlareYield Manager - For Tester
 
-## � VAULT RECOVERY COMPLETED - Feb 8, 2026
+## ✅ VAULT FULLY OPERATIONAL - VERIFIED Feb 8, 2026
 
 ### What Happened
 The ParentVault on Coston2 had a corrupted `activeStrategy` state (set to `0x00000000000000000000000000000003e8` instead of a valid address), which caused `totalAssets()` to revert and blocked all settlements.
+
+**Root Cause Confirmed**: Internal transaction trace proved the failure was **NOT a depositId mismatch**, but corrupted vault storage. See `SETTLEMENT_FAILURE_ROOT_CAUSE.md` for full forensic analysis.
 
 ### Recovery Actions Taken
 1. ✅ Deployed `ParentVaultRecovery.sol` with emergency `resetActiveStrategy()` function
 2. ✅ Upgraded vault proxy to recovery implementation  
 3. ✅ Reset corrupted strategy to `address(0)`
-4. ✅ Upgraded back to original ParentVault implementation
-5. ✅ Verified functionality: `totalAssets()` = 66.175 XRP
+4. ✅ Deployed fresh ParentVault implementation (same code, new metadata)
+5. ✅ Verified functionality: `totalAssets()` = 66.275 XRP
 
-**TX Hash**: `0x7974aa940ca84f23d41286eaf1f2473ee2fdb3dc75e9c35a86105452320da700`
+**Recovery TX**: `0x7974aa940ca84f23d41286eaf1f2473ee2fdb3dc75e9c35a86105452320da700`
+
+### Settlement Verified — Actual Proof
+**✅ Original pending deposit successfully settled!**
+
+- **Settlement TX**: `0x022bdc77f62c0c486ebd2972e10f4cf440087e9af5421ef31961f7641a1b0957`
+- **Transfer Event**: 234,000 shares minted to user `0xb0692534faf7369e534afffa5cc55ef52e6b6114`
+- **Deposit Cleared**: `pendingDirectMints` now returns zero-struct
+- **See**: `SETTLEMENT_VERIFIED.md` for complete proof
 
 ### Current Vault Status
 - **ParentVault**: `0x01f64160E4928Eba5607aE294F9B66090Dc323B3`
-- **Active Strategy**: `address(0)` (no active strategy)
-- **Total Assets**: 66.175 XRP  
-- **Status**: ✅ **FULLY FUNCTIONAL** - Ready for deposits/withdrawals
-- **Settlement**: ✅ **NOW WORKING**
+- **Active Strategy**: `address(0)` — ✅ SAFE (all code paths have guards)
+- **Total Assets**: 66.275 XRP — ✅ VERIFIED
+- **Settlement**: ✅ **WORKING** — Verified with Transfer event
+- **Status**: ✅ **FULLY OPERATIONAL**
 
-**The protocol is now ready for fresh testing!**
+**The protocol is ready for production testing!**
+
+### Bonus Fix: toBytes() Bug
+While investigating the failure, we discovered and fixed a bug in the executor's depositId derivation. The bug (`toBytes()` UTF-8 encoding instead of hex decoding) didn't cause the original failure, but could cause future issues.
+
+**Fix Applied**:
+- Changed `keccak256(toBytes(xrplTxHash))` → `keccak256(\`0x${clean}\`)`
+- Added defensive validation (trim, strip prefix, validate 64-hex format)
+- See `executor/src/flareExecutor.ts` lines 301-307
+
+**Still Required**: Restart executor and test with new deposit to verify fix works in practice.
 
 ---
 
