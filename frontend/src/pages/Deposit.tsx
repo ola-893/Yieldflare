@@ -6,7 +6,7 @@ import {Lock, RefreshCw, Check, ArrowRight, Copy, Clock, AlertCircle, Coins, Shi
 import xrpImg from '../assets/images/xrp.webp';
 import btcImg from '../assets/images/btc.webp';
 import {CONTRACTS, FASSET_ADAPTER_ABI, ASSET_MANAGER_ABI, MINTING_TAG_MANAGER_ABI, PARENT_VAULT_ABI} from '../config/contracts';
-import {requestSignedRebalance, checkFceHealth} from '../services/fceClient';
+import {requestSignedRebalance, checkFceHealth, type ExecuteRebalanceParams} from '../services/fceClient';
 
 type DepositFlow = 'FASSET' | 'ERC4626';
 type FassetStep = 'SELECT' | 'RESERVE_TAG' | 'AWAITING_DEPOSIT' | 'READY_TO_SETTLE' | 'SETTLING' | 'DEPLOY' | 'COMPLETE';
@@ -114,8 +114,29 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const {writeContract: registerTag, data: registerHash, isPending: isRegistering, error: registerError} = useWriteContract();
   const {isLoading: isRegisterConfirming, data: registerReceipt, error: registerReceiptError} = useWaitForTransactionReceipt({hash: registerHash});
 
-  const {writeContract: settleMint, data: settleHash, isPending: isSettling} = useWriteContract();
-  const {isLoading: isSettleConfirming} = useWaitForTransactionReceipt({hash: settleHash});
+  const {writeContract: settleMint, data: settleHash, isPending: isSettling, error: settleError} = useWriteContract();
+  const {isLoading: isSettleConfirming, error: settleReceiptError} = useWaitForTransactionReceipt({hash: settleHash});
+  
+  // Decode settlement errors
+  const [settlementErrorMessage, setSettlementErrorMessage] = useState<string | null>(null);
+  
+  useEffect(() => {
+    if (settleError || settleReceiptError) {
+      const error = settleError || settleReceiptError;
+      const errorMsg = error?.message || String(error);
+      
+      // Decode custom Solidity errors
+      if (errorMsg.includes('UnknownDirectMint')) {
+        setSettlementErrorMessage('Deposit has not been processed on-chain by the executor yet. Please wait...');
+      } else if (errorMsg.includes('InsufficientFAssetBalance')) {
+        setSettlementErrorMessage('Adapter has not received FXRP tokens yet.');
+      } else if (errorMsg.includes('UnknownPendingDeposit')) {
+        setSettlementErrorMessage('ParentVault deposit queue pending.');
+      } else {
+        setSettlementErrorMessage(errorMsg.slice(0, 200));
+      }
+    }
+  }, [settleError, settleReceiptError]);
 
   const {data: reservationFeeRaw, isLoading: isFeeLoading, error: feeError} = useReadContract({
     address: CONTRACTS.mintingTagManager,
@@ -219,6 +240,12 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
 
   const handleSettle = () => {
     if (!depositId) return;
+    if (!isDepositProcessedOnChain) {
+      setSettlementErrorMessage('Deposit has not been processed on-chain yet. Please wait for the executor...');
+      return;
+    }
+    
+    setSettlementErrorMessage(null); // Clear previous errors
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     settleMint({
       address: CONTRACTS.fAssetAdapter,
@@ -276,23 +303,23 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
         throw new Error('TEE extension is not available. Please ensure the FCE extension is running on port 8080.');
       }
 
-      // 2. Request signed rebalance payload from TEE
-      const signedPayload = await requestSignedRebalance({
+      // 2. Request signed rebalance payload from TEE (returns unbundled params)
+      const params: ExecuteRebalanceParams = await requestSignedRebalance({
         vaultAddress: CONTRACTS.parentVault,
         idleAssets: xrplAmount ? BigInt(Math.floor(parseFloat(xrplAmount) * 1e6)) : 0n,
         approvedStrategies: [CONTRACTS.strategies.enosysFxrp],
         liquidityBufferBps: 1000, // 10% buffer
       });
 
-      console.log('[Deploy] Signed payload received, submitting to chain...');
+      console.log('[Deploy] Signed params received, submitting to chain...');
 
-      // 3. Submit signed payload to executeRebalance()
+      // 3. Submit 5 separate params to executeRebalance(resultData, actionId, submissionTag, status, signature)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       executeRebalance({
         address: CONTRACTS.parentVault,
         abi: PARENT_VAULT_ABI as any,
         functionName: 'executeRebalance',
-        args: [signedPayload],
+        args: [params.resultData, params.actionId, params.submissionTag, params.status, params.signature],
       } as any);
 
       setIsRequestingSignature(false);
@@ -328,13 +355,22 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   const {coreVaultAddress, isLoading: isVaultLoading} = useCoreVaultAddress();
   const [vaultCopied, setVaultCopied] = useState(false);
 
-  const {data: pendingDirectMint} = useReadContract({
+  // Poll pendingDirectMints to check if executor has processed the deposit
+  const {data: pendingDirectMint, isLoading: isPendingDirectMintLoading} = useReadContract({
     address: CONTRACTS.fAssetAdapter,
     abi: FASSET_ADAPTER_ABI,
     functionName: 'pendingDirectMints',
     args: depositId ? [depositId as `0x${string}`] : undefined,
-    query: {enabled: step === 'READY_TO_SETTLE' && !!depositId},
+    query: {
+      enabled: step === 'READY_TO_SETTLE' && !!depositId,
+      refetchInterval: 3000, // Poll every 3 seconds
+    },
   });
+
+  // Check if deposit has been processed by executor
+  const isDepositProcessedOnChain = pendingDirectMint 
+    ? (pendingDirectMint as any)[0] !== '0x0000000000000000000000000000000000000000' && (pendingDirectMint as any)[2] > 0n
+    : false;
 
   useEffect(() => {
     if (pendingDirectMint && step === 'READY_TO_SETTLE') {
@@ -502,7 +538,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
         throw new Error('TEE extension not available. Auto-deploy skipped.');
       }
 
-      const signedPayload = await requestSignedRebalance({
+      const params = await requestSignedRebalance({
         vaultAddress: CONTRACTS.parentVault,
         idleAssets: xrplAmount ? BigInt(Math.floor(parseFloat(xrplAmount) * 1e6)) : 0n,
         approvedStrategies: [CONTRACTS.strategies.enosysFxrp],
@@ -513,7 +549,7 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
         address: CONTRACTS.parentVault,
         abi: PARENT_VAULT_ABI as any,
         functionName: 'executeRebalance',
-        args: [signedPayload],
+        args: [params.resultData, params.actionId, params.submissionTag, params.status, params.signature],
       } as any);
 
       localStorage.removeItem('flux-auto-deploy');
@@ -717,6 +753,9 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
               asset={asset}
               onSettle={handleSettle}
               isSettling={isSettling || isSettleConfirming}
+              isDepositProcessedOnChain={isDepositProcessedOnChain}
+              isPendingDirectMintLoading={isPendingDirectMintLoading}
+              settlementError={settlementErrorMessage}
             />
           )}
 
@@ -1111,8 +1150,14 @@ const StepReadyToSettle: React.FC<{
   asset: 'XRP' | 'BTC';
   onSettle: () => void;
   isSettling: boolean;
-}> = ({depositId, xrplTxHash, xrplAmount, asset, onSettle, isSettling}) => {
+  isDepositProcessedOnChain: boolean;
+  isPendingDirectMintLoading: boolean;
+  settlementError?: string | null;
+}> = ({depositId, xrplTxHash, xrplAmount, asset, onSettle, isSettling, isDepositProcessedOnChain, isPendingDirectMintLoading, settlementError}) => {
   const xrplExplorerUrl = xrplTxHash ? `https://testnet.xrpl.org/transactions/${xrplTxHash}` : null;
+
+  // Show "Awaiting Executor Processing" state if deposit not yet processed on-chain
+  const isWaitingForExecutor = !isDepositProcessedOnChain;
 
   return (
     <motion.div
@@ -1120,14 +1165,24 @@ const StepReadyToSettle: React.FC<{
       className="glass-panel p-6 sm:p-8 rounded-3xl border border-emerald-500/30 shadow-soft-editorial bg-white/60"
     >
       <div className="text-center mb-8">
-        <div className="w-16 h-16 rounded-full bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center mx-auto mb-4">
-          <Check className="w-8 h-8 text-emerald-600" />
+        <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${
+          isWaitingForExecutor 
+            ? 'bg-amber-500/10 border border-amber-500/30' 
+            : 'bg-emerald-500/10 border border-emerald-500/30'
+        }`}>
+          {isWaitingForExecutor ? (
+            <Clock className="w-8 h-8 text-amber-600 animate-pulse" />
+          ) : (
+            <Check className="w-8 h-8 text-emerald-600" />
+          )}
         </div>
         <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
-          FAssets received!
+          {isWaitingForExecutor ? 'Awaiting Executor Processing...' : 'FAssets received!'}
         </h3>
         <p className="text-xs text-[#4A4A4A]">
-          Your deposit has been processed. Click below to settle and receive your Flux tokens.
+          {isWaitingForExecutor 
+            ? 'The executor is processing your XRPL deposit on-chain. This usually takes 15-30 seconds...' 
+            : 'Your deposit has been processed. Click below to settle and receive your Flux tokens.'}
         </p>
       </div>
 
@@ -1150,18 +1205,49 @@ const StepReadyToSettle: React.FC<{
             </a>
           </div>
         )}
+        {isWaitingForExecutor && (
+          <div className="flex items-start gap-2 p-3 rounded-xl bg-amber-50 border border-amber-200 mt-3">
+            <AlertCircle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+            <div className="text-xs text-amber-800">
+              <div className="font-bold mb-1">Waiting for on-chain confirmation</div>
+              <div className="text-[10px] leading-relaxed">
+                The executor bot must call <code className="bg-amber-100 px-1 py-0.5 rounded font-mono">processDirectMint()</code> before you can settle. 
+                This happens automatically when your XRPL payment is detected. Polling every 3 seconds...
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
+      {settlementError && (
+        <div className="mb-4 p-3 rounded-xl bg-red-50 border border-red-200 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-red-600 flex-shrink-0 mt-0.5" />
+          <div className="text-xs text-red-800">
+            <div className="font-bold">Settlement Failed</div>
+            <div className="mt-1 text-[10px]">{settlementError}</div>
+          </div>
+        </div>
+      )}
+
       <button
-        onClick={onSettle} disabled={isSettling}
-        className="w-full py-3.5 rounded-full bg-emerald-600 text-white text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-emerald-700 transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50"
+        onClick={onSettle} 
+        disabled={isSettling || isWaitingForExecutor || isPendingDirectMintLoading}
+        className="w-full py-3.5 rounded-full bg-emerald-600 text-white text-[11px] font-bold uppercase tracking-[0.2em] hover:bg-emerald-700 transition-all shadow-md flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
       >
         {isSettling ? (
           <><RefreshCw className="w-4 h-4 animate-spin" /><span>Settling Deposit...</span></>
+        ) : isWaitingForExecutor ? (
+          <><RefreshCw className="w-4 h-4 animate-spin" /><span>Awaiting Executor...</span></>
         ) : (
           <><span>Settle & Receive Shares</span><ArrowRight className="w-4 h-4" /></>
         )}
       </button>
+
+      {isWaitingForExecutor && (
+        <p className="text-[9px] text-center text-[#4A4A4A] mt-3 font-mono">
+          Checking on-chain status every 3 seconds...
+        </p>
+      )}
     </motion.div>
   );
 };
