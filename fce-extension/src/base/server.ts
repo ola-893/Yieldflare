@@ -196,6 +196,18 @@ export class Server {
     req: http.IncomingMessage,
     res: http.ServerResponse,
   ): Promise<void> {
+    // Handle CORS preflight
+    if (req.method === "OPTIONS") {
+      res.writeHead(204, {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type",
+        "Access-Control-Max-Age": "86400",
+      });
+      res.end();
+      return;
+    }
+
     let body = "";
     try {
       body = await readBody(req);
@@ -227,6 +239,7 @@ function send(res: http.ServerResponse, status: number, payload: unknown): void 
   res.writeHead(status, {
     "Content-Type": isText ? "text/plain" : "application/json",
     "Content-Length": Buffer.byteLength(body),
+    "Access-Control-Allow-Origin": "*",
   });
   res.end(body);
 }

@@ -78,6 +78,14 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
   // Always start at SELECT phase — but remember any previously saved tag.
   const [savedTag, setSavedTag] = useState<string | null>(null);
 
+  // ─── Tag Activation Cooldown ──────────────────────────────────────────────
+  // Flare's MintingTagManager has a cooldown after setAllowedExecutor is called.
+  // Users must wait before sending XRP, otherwise the executor can't process it.
+  const TAG_COOLDOWN_SECONDS = 120; // 2 minutes (conservative estimate)
+  const [tagCooldownDeadline, setTagCooldownDeadline] = useState<number | null>(null);
+  const [tagCooldownRemaining, setTagCooldownRemaining] = useState(0);
+  const [tagReady, setTagReady] = useState(false);
+
   useEffect(() => {
     const saved = localStorage.getItem('flux-deposit-state');
     if (saved) {
@@ -86,9 +94,47 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
         if (parsed.tag) {
           setSavedTag(parsed.tag);
         }
+        // Restore cooldown state
+        if (parsed.cooldownDeadline && parsed.cooldownDeadline > Date.now()) {
+          setTagCooldownDeadline(parsed.cooldownDeadline);
+          setTagReady(false);
+        } else if (parsed.cooldownDeadline && parsed.cooldownDeadline <= Date.now()) {
+          // Cooldown expired while away
+          setTagReady(true);
+          setTagCooldownRemaining(0);
+        } else if (parsed.step === 'AWAITING_DEPOSIT' && parsed.tag) {
+          // Existing tag but no cooldown tracked — assume ready
+          setTagReady(true);
+        }
       } catch { /* ignore */ }
     }
   }, []);
+
+  // Countdown timer for tag activation
+  useEffect(() => {
+    if (!tagCooldownDeadline || tagReady) return;
+
+    const interval = setInterval(() => {
+      const remaining = Math.max(0, Math.ceil((tagCooldownDeadline - Date.now()) / 1000));
+      setTagCooldownRemaining(remaining);
+
+      if (remaining <= 0) {
+        clearInterval(interval);
+        setTagReady(true);
+        // Update localStorage to mark as ready
+        try {
+          const saved = localStorage.getItem('flux-deposit-state');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            parsed.tagReady = true;
+            localStorage.setItem('flux-deposit-state', JSON.stringify(parsed));
+          }
+        } catch { /* ignore */ }
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [tagCooldownDeadline, tagReady]);
 
   // ─── FAsset Flow Hooks ────────────────────────────────────────────────────
   const {data: userReservedTags, isLoading: isTagsLoading} = useReadContract({
@@ -198,7 +244,20 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
         if (actualTag) {
           setReservedTag(actualTag);
           setStep('AWAITING_DEPOSIT');
-          saveState('AWAITING_DEPOSIT', actualTag);
+          // Start cooldown timer
+          const deadline = Date.now() + TAG_COOLDOWN_SECONDS * 1000;
+          setTagCooldownDeadline(deadline);
+          setTagReady(false);
+          setTagCooldownRemaining(TAG_COOLDOWN_SECONDS);
+          localStorage.setItem('flux-deposit-state', JSON.stringify({
+            step: 'AWAITING_DEPOSIT',
+            tag: actualTag,
+            asset,
+            depositId: null,
+            depositFlow,
+            cooldownDeadline: deadline,
+            tagReady: false,
+          }));
         } else {
           console.error('MintingTagRegistered event not found in receipt logs');
         }
@@ -620,6 +679,9 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
     setDepositId(null);
     setCdpAmount('');
     setCdpTxHash(undefined);
+    setTagCooldownDeadline(null);
+    setTagCooldownRemaining(0);
+    setTagReady(false);
   };
 
   const handleNewDeposit = () => {
@@ -631,6 +693,9 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
       setDepositId(null);
       setXrplTxHash(null);
       setXrplAmount(null);
+      setTagCooldownDeadline(null);
+      setTagCooldownRemaining(0);
+      setTagReady(false);
       setStep('AWAITING_DEPOSIT');
       saveState('AWAITING_DEPOSIT');
     }
@@ -782,6 +847,9 @@ export const DepositPage: React.FC<DepositPageProps> = ({onBack}) => {
               onCopyVaultAddress={handleCopyVaultAddress}
               vaultCopied={vaultCopied}
               copied={copied}
+              cooldownRemaining={tagCooldownRemaining}
+              cooldownTotal={TAG_COOLDOWN_SECONDS}
+              isReady={tagReady}
             />
           )}
 
@@ -1112,77 +1180,138 @@ const StepAwaitingDeposit: React.FC<{
   onCopyVaultAddress: () => void;
   vaultCopied: boolean;
   copied: boolean;
-}> = ({tag, asset, coreVaultAddress, isVaultLoading, onCopyTag, onCopyVaultAddress, vaultCopied, copied}) => (
-  <motion.div
-    initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
-    className="glass-panel p-6 sm:p-8 rounded-3xl border border-[#1E1E1E]/15 shadow-soft-editorial bg-white/60"
-  >
-    <div className="text-center mb-8">
-      <div className="w-16 h-16 rounded-full bg-[#E1BAC2]/10 border border-[#E1BAC2]/30 flex items-center justify-center mx-auto mb-4">
-        <Clock className="w-8 h-8 text-[#E1BAC2] animate-pulse" />
-      </div>
-      <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
-        Send native {asset} to mint FAssets
-      </h3>
-      <p className="text-xs text-[#4A4A4A]">
-        Your tag is reserved. Send {asset} from your non-EVM wallet using the tag below.
-      </p>
-    </div>
+  cooldownRemaining: number;
+  cooldownTotal: number;
+  isReady: boolean;
+}> = ({tag, asset, coreVaultAddress, isVaultLoading, onCopyTag, onCopyVaultAddress, vaultCopied, copied, cooldownRemaining, cooldownTotal, isReady}) => {
+  const cooldownProgress = cooldownTotal > 0 ? ((cooldownTotal - cooldownRemaining) / cooldownTotal) * 100 : 100;
+  const cooldownMinutes = Math.floor(cooldownRemaining / 60);
+  const cooldownSeconds = cooldownRemaining % 60;
 
-    <div className="p-5 rounded-2xl bg-[#1E1E1E] text-[#F5F5F3] mb-6">
-      <p className="text-[10px] font-mono text-[#E1BAC2] uppercase tracking-wider mb-2">Your Minting Tag</p>
-      <div className="flex items-center justify-between">
-        <span className="text-2xl font-mono font-bold">{tag}</span>
-        <button onClick={onCopyTag} className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors">
-          {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
-        </button>
+  return (
+    <motion.div
+      initial={{opacity: 0, y: 20}} animate={{opacity: 1, y: 0}} exit={{opacity: 0, y: -20}}
+      className="glass-panel p-6 sm:p-8 rounded-3xl border border-[#1E1E1E]/15 shadow-soft-editorial bg-white/60"
+    >
+      <div className="text-center mb-8">
+        <div className="w-16 h-16 rounded-full bg-[#E1BAC2]/10 border border-[#E1BAC2]/30 flex items-center justify-center mx-auto mb-4">
+          {isReady ? (
+            <Check className="w-8 h-8 text-emerald-500" />
+          ) : (
+            <Clock className="w-8 h-8 text-[#E1BAC2] animate-pulse" />
+          )}
+        </div>
+        <h3 className="text-xl font-extrabold text-[#1E1E1E] mb-2" style={{fontFamily: 'Manrope, sans-serif'}}>
+          {isReady ? `Send native ${asset} to mint FAssets` : 'Activating your minting tag...'}
+        </h3>
+        <p className="text-xs text-[#4A4A4A]">
+          {isReady
+            ? `Your tag is ready. Send ${asset} from your non-EVM wallet using the tag below.`
+            : 'Flare is activating your tag. Please wait before sending XRP.'}
+        </p>
       </div>
-    </div>
 
-    <div className="space-y-3 mb-6">
-      <div className="flex items-start gap-3 p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
-        <span className="w-5 h-5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center text-[10px] font-bold shrink-0">1</span>
-        <p className="text-xs text-[#1E1E1E]">Open your {asset === 'XRP' ? 'XRP ' : 'Bitcoin'} wallet</p>
-      </div>
-      <div className="flex items-start gap-3 p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
-        <span className="w-5 h-5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center text-[10px] font-bold shrink-0">2</span>
-        <div className="flex-1">
-          <p className="text-xs text-[#1E1E1E]">Send {asset} to the FAsset Core Vault with destination tag: <strong>{tag}</strong></p>
-          <div className="mt-2 p-3 rounded-xl bg-[#1E1E1E] text-[#F5F5F3]">
-            <div className="flex items-center justify-between mb-1">
-              <p className="text-[10px] font-mono text-[#E1BAC2] uppercase tracking-wider">Core Vault Address ({asset === 'XRP' ? 'XRPL' : 'BTC'})</p>
-              <button onClick={onCopyVaultAddress} className="p-1 rounded-md bg-white/10 hover:bg-white/20 transition-colors">
-                {vaultCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
-              </button>
-            </div>
-            {isVaultLoading ? (
+      {/* Cooldown Timer */}
+      {!isReady && (
+        <div className="mb-6">
+          <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200">
+            <div className="flex items-center justify-between mb-3">
               <div className="flex items-center gap-2">
-                <RefreshCw className="w-3 h-3 animate-spin text-[#E1BAC2]" />
-                <span className="text-[10px] font-mono text-white/50">Fetching from AssetManager...</span>
+                <Clock className="w-4 h-4 text-amber-600" />
+                <span className="text-xs font-bold text-amber-800">Tag Activation Cooldown</span>
               </div>
-            ) : coreVaultAddress ? (
-              <p className="text-[11px] font-mono font-bold break-all leading-relaxed">{coreVaultAddress}</p>
-            ) : (
-              <p className="text-[10px] font-mono text-red-400">Unable to fetch address — check Flare AssetManager</p>
-            )}
+              <span className="text-lg font-mono font-bold text-amber-900">
+                {cooldownMinutes}:{cooldownSeconds.toString().padStart(2, '0')}
+              </span>
+            </div>
+            <div className="w-full h-2 bg-amber-200 rounded-full overflow-hidden">
+              <motion.div
+                className="h-full bg-amber-500 rounded-full"
+                initial={{width: 0}}
+                animate={{width: `${cooldownProgress}%`}}
+                transition={{duration: 0.5}}
+              />
+            </div>
+            <p className="text-[10px] text-amber-700 mt-2">
+              ⚠️ Do NOT send XRP until this timer reaches zero. Sending too early will cause your deposit to fail.
+            </p>
           </div>
-          <p className="text-[10px] text-[#4A4A4A] mt-1.5">
-            This is Flare's FAsset Direct Minting deposit address. Payments here are automatically routed to your vault via the destination tag.
-          </p>
+        </div>
+      )}
+
+      <div className="p-5 rounded-2xl bg-[#1E1E1E] text-[#F5F5F3] mb-6">
+        <p className="text-[10px] font-mono text-[#E1BAC2] uppercase tracking-wider mb-2">Your Minting Tag</p>
+        <div className="flex items-center justify-between">
+          <span className="text-2xl font-mono font-bold">{tag}</span>
+          <button onClick={onCopyTag} className="p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors">
+            {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+          </button>
         </div>
       </div>
-      <div className="flex items-start gap-3 p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
-        <span className="w-5 h-5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center text-[10px] font-bold shrink-0">3</span>
-        <p className="text-xs text-[#1E1E1E]">Wait for FAsset attestation — this page will update automatically</p>
-      </div>
-    </div>
 
-    <div className="flex items-center justify-center gap-2 text-[10px] font-mono text-[#4A4A4A]">
-      <span className="w-2 h-2 rounded-full bg-[#E1BAC2] animate-pulse" />
-      Polling for deposit confirmation...
-    </div>
-  </motion.div>
-);
+      {/* Instructions - only show when ready */}
+      {isReady ? (
+        <div className="space-y-3 mb-6">
+          <div className="flex items-start gap-3 p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
+            <span className="w-5 h-5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center text-[10px] font-bold shrink-0">1</span>
+            <p className="text-xs text-[#1E1E1E]">Open your {asset === 'XRP' ? 'XRP ' : 'Bitcoin'} wallet</p>
+          </div>
+          <div className="flex items-start gap-3 p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
+            <span className="w-5 h-5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center text-[10px] font-bold shrink-0">2</span>
+            <div className="flex-1">
+              <p className="text-xs text-[#1E1E1E]">Send {asset} to the FAsset Core Vault with destination tag: <strong>{tag}</strong></p>
+              <div className="mt-2 p-3 rounded-xl bg-[#1E1E1E] text-[#F5F5F3]">
+                <div className="flex items-center justify-between mb-1">
+                  <p className="text-[10px] font-mono text-[#E1BAC2] uppercase tracking-wider">Core Vault Address ({asset === 'XRP' ? 'XRPL' : 'BTC'})</p>
+                  <button onClick={onCopyVaultAddress} className="p-1 rounded-md bg-white/10 hover:bg-white/20 transition-colors">
+                    {vaultCopied ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  </button>
+                </div>
+                {isVaultLoading ? (
+                  <div className="flex items-center gap-2">
+                    <RefreshCw className="w-3 h-3 animate-spin text-[#E1BAC2]" />
+                    <span className="text-[10px] font-mono text-white/50">Fetching from AssetManager...</span>
+                  </div>
+                ) : coreVaultAddress ? (
+                  <p className="text-[11px] font-mono font-bold break-all leading-relaxed">{coreVaultAddress}</p>
+                ) : (
+                  <p className="text-[10px] font-mono text-red-400">Unable to fetch address — check Flare AssetManager</p>
+                )}
+              </div>
+              <p className="text-[10px] text-[#4A4A4A] mt-1.5">
+                This is Flare's FAsset Direct Minting deposit address. Payments here are automatically routed to your vault via the destination tag.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-start gap-3 p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10">
+            <span className="w-5 h-5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center text-[10px] font-bold shrink-0">3</span>
+            <p className="text-xs text-[#1E1E1E]">Wait for FAsset attestation — this page will update automatically</p>
+          </div>
+        </div>
+      ) : (
+        <div className="space-y-3 mb-6">
+          <div className="flex items-start gap-3 p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10 opacity-50">
+            <span className="w-5 h-5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center text-[10px] font-bold shrink-0">1</span>
+            <p className="text-xs text-[#1E1E1E]">Open your {asset === 'XRP' ? 'XRP ' : 'Bitcoin'} wallet</p>
+          </div>
+          <div className="flex items-start gap-3 p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10 opacity-50">
+            <span className="w-5 h-5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center text-[10px] font-bold shrink-0">2</span>
+            <p className="text-xs text-[#1E1E1E]">Send {asset} to the Core Vault (instructions will appear after cooldown)</p>
+          </div>
+          <div className="flex items-start gap-3 p-3 rounded-xl bg-[#F5F5F3] border border-[#1E1E1E]/10 opacity-50">
+            <span className="w-5 h-5 rounded-full bg-[#1E1E1E] text-[#F5F5F3] flex items-center justify-center text-[10px] font-bold shrink-0">3</span>
+            <p className="text-xs text-[#1E1E1E]">Wait for FAsset attestation</p>
+          </div>
+        </div>
+      )}
+
+      <div className="flex items-center justify-center gap-2 text-[10px] font-mono text-[#4A4A4A]">
+        <span className="w-2 h-2 rounded-full bg-[#E1BAC2] animate-pulse" />
+        {isReady ? 'Polling for deposit confirmation...' : `Activating tag... ${cooldownRemaining}s remaining`}
+      </div>
+    </motion.div>
+  );
+};
 
 // ─── FAsset Step: Ready to Settle ───────────────────────────────────────────
 const StepReadyToSettle: React.FC<{
